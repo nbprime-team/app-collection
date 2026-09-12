@@ -1,71 +1,37 @@
-Prime Phigros - DOOM-derived firmware input hook
-================================================
+PrimeCode for HP Prime
+======================
 
-This build is a small Phigros-style rhythm game for HP Prime. It renders a
-four-lane chart, falling tap/flick/hold-shaped notes, a judgement line,
-combo and score feedback, and a retry screen. Touch the lane when a note is
-near the judgement line; any keyboard event exits and restores the hook.
+本目录是 PrimeCode 编辑器（HP Prime 的机上代码编辑器）的实现，含两种：
 
-The original Suika fruit physics is retained only as an unused compatibility
-implementation. The active game loop uses the chart clock and note renderer.
+  primecode.c           C 实现 —— 用组织内工具链交叉编译为 ELF，由加载器装入运行
+  primecode.hpappdir/   MicroPython 实现 —— 可直接拷入计算器运行
 
-This version does NOT poll SVC #0x1003f from the game loop.
-It reproduces the input-hook mechanism observed in puredoom.elf:
+功能（据 primecode.c）
+-----------------------
+- 语法高亮，HPPL / Python 模式可切换（hppl_mode）
+- 搜索与替换
+- 自动补全（候选列表）
+- 行号栏、gutter、滚动条、标题栏
+- 键盘与触摸输入（含 SHIFT / ALPHA / SYM 等修饰键）
+- 编辑缓冲区上限：512 行 × 512 字符
 
-  firmware -> 0x307FBFA0 trampoline -> suika_event_hook()
-                        -> SVC #0x1003f
-                        -> parse ui_event_prime_s
-                        -> volatile input state
-
-The hook target 0x307FBFA0 and the privileged cache-flushing copy routine
-are extracted from the supplied DOOM/puredoom.elf. Therefore this build is
-intended for the same HP Prime firmware/environment as that DOOM binary.
-
-Input behavior
+构建（C 实现）
 --------------
-* Tap notes: touch the matching lane near the judgement line.
-* Flick notes: touch and release with an upward swipe near the line.
-* Hold notes: touch near the line and keep holding until the long note ends.
-* Touch end: restart after the chart result screen, or release a Hold note.
-* Any key down OR key up event: quit immediately and restore the original
-  16 bytes at 0x307FBFA0.
+  source ../../toolchain/scripts/env.sh
+  make clean && make
 
-The framebuffer is rendered off-screen (320x240x32-bit) and then copied to
-LCD once per frame to reduce visible tearing/flicker.
+输出 primecode.elf（ELF32 / DYN / ARM / soft-float）。
+构建需要 font/unifont-17.0.04.hex（已内置，无需联网）。
 
-Build in Debian / Termux
--------------------------
-  make clean
-  make
+用法
+----
+C 实现：把 primecode.elf 交给 ELF 加载器。加载器可参考
+  app-collection/tools/runelf/runelf.hpappdir/main.py
+（改其中 APP_ELF_FILENAME 与 APP_DIR_FOR_C_CODE 两个常量即可）。
 
-When using the bundled toolchain in `armtc/`, its binaries need execute
-permission. The GCC driver also needs its internal compiler directory and the
-bundled assembler before the system tools:
+MicroPython 实现：把 primecode.hpappdir/ 整个拷入计算器 C:\DATA\ 后运行。
 
-  chmod u+x armtc/root/usr/bin/arm-none-eabi-*
-  chmod u+x armtc/root/usr/lib/gcc/arm-none-eabi/14.2.1/cc1
-  mkdir -p armtc-tools
-  ln -sf ../armtc/root/usr/bin/arm-none-eabi-as armtc-tools/as
-  ln -sf ../armtc/root/usr/bin/arm-none-eabi-ld armtc-tools/ld
-  PATH="$PWD/armtc-tools:$PWD/armtc/root/usr/bin:$PWD/armtc/root/usr/lib/gcc/arm-none-eabi/14.2.1:$PATH" make
-
-If Unifont is not already cached, make downloads GNU Unifont 17.0.04 and
-builds a compact ASCII subset into unifont_font.c.
-
-Output:
-  suika_prime.elf
-
-Replace the ELF loaded by the Python launcher (for example my_app.elf).
-Do not test this hook build on an unrelated firmware version: the fixed
-0x307FBFA0 hook address comes from the supplied DOOM binary.
-
-Safety
-------
-The program saves and restores the original 16 bytes at the hook address.
-If the program terminates because of a key event, main() calls
-remove_input_hook() before returning.
-
-Phigros changes:
-- Replaced the active Suika loop with a 32-note four-lane chart.
-- Added tap, flick and hold-shaped note rendering, timing windows, score,
-  combo, misses and retry state.
+说明
+----
+本文件此前复制了另一个程序（Suika 水果游戏）的说明，与 primecode.c 的实际
+内容不符；现已按源码更正。Suika 项目见 app-collection/examples/suika/。
