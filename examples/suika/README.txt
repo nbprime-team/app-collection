@@ -1,51 +1,43 @@
-Suika Prime v4 - DOOM-derived firmware input hook
-===================================================
+Suika Prime —— 水果合并小游戏
+================================
 
-This version does NOT poll SVC #0x1003f from the game loop.
-It reproduces the input-hook mechanism observed in puredoom.elf:
+输入方式（不轮询 SVC）
+----------------------
+本程序**不在游戏循环里轮询 SVC #0x1003f**。固件输入分发入口（0x307FBFA0）被换成
+指向本程序回调的 trampoline：
 
-  firmware -> 0x307FBFA0 trampoline -> suika_event_hook()
-                        -> SVC #0x1003f
-                        -> parse ui_event_prime_s
-                        -> volatile input state
+  固件 -> 0x307FBFA0 trampoline -> suika_event_hook()
+                 -> SVC #0x1003f（取事件）
+                 -> 解析 ui_event_prime_s
+                 -> volatile 输入状态
 
-The hook target 0x307FBFA0 and the privileged cache-flushing copy routine
-are extracted from the supplied DOOM/puredoom.elf. Therefore this build is
-intended for the same HP Prime firmware/environment as that DOOM binary.
+钩子实现统一走 SDK 的 `toolchain/sdk/prime_hook.c`（trampoline 直达回调，回调内自行
+调用 `prime_sys_get_event`）。钩子目标 0x307FBFA0 与特权 cache 刷新拷贝例程取自
+DOOM/puredoom.elf，因此本构建**只适用于与该 DOOM 二进制相同的固件环境**。
 
-Input behavior
---------------
-* Touch begin/move: move the current fruit horizontally.
-* Touch end: drop the current fruit.
-* Any key down OR key up event: quit immediately and restore the original
-  16 bytes at 0x307FBFA0.
+操作
+----
+* 触摸按下/移动：左右移动当前水果。
+* 触摸抬起：放下水果。
+* 任意键按下或抬起：立即退出，并还原 0x307FBFA0 处的原始 16 字节。
 
-The framebuffer is rendered off-screen (320x240x32-bit) and then copied to
-LCD once per frame to reduce visible tearing/flicker.
+画面为 320x240x32 位离屏渲染，每帧一次性拷贝到 LCD，减少撕裂/闪烁。
 
-Build in Debian / Termux
--------------------------
+构建（Debian / Termux）
+----------------------
   make clean
   make
 
-If Unifont is not already cached, make downloads GNU Unifont 17.0.04 and
-builds a compact ASCII subset into unifont_font.c.
+字体：GNU Unifont 17.0.04 的 ASCII 子集，来自共享资源
+`app-collection/resources/prime-unifont/`（hex 已内置；缺失时才联网获取），与 cube3d 同源。
 
-Output:
+产物：
   suika_prime.elf
 
-Replace the ELF loaded by the Python launcher (for example my_app.elf).
-Do not test this hook build on an unrelated firmware version: the fixed
-0x307FBFA0 hook address comes from the supplied DOOM binary.
+把它替换 Python 加载器所用的 ELF（例如 my_app.elf）。
+不要在其它固件版本上测试本钩子构建：0x307FBFA0 取自提供的 DOOM 二进制。
 
-Safety
-------
-The program saves and restores the original 16 bytes at the hook address.
-If the program terminates because of a key event, main() calls
-remove_input_hook() before returning.
-
-V5 changes:
-- Moved the score/NEXT HUD down slightly and moved the red playfield boundary to y=40 so the HUD no longer crosses the line.
-- Added a 20-frame (about 400 ms) lock after dropping a fruit. A new fruit cannot be spawned during this interval, preventing a second immediate tap from producing an edge-stuck fruit.
-- Moved ANY KEY EXIT to the left side at x=4.
-- Draws ANY KEY EXIT after fruit sprites so fruits do not cover the exit hint.
+安全
+----
+程序会保存并还原钩子地址处的原始 16 字节；若因按键退出，main() 在返回前调用
+`prime_hook_remove()` 恢复固件原始代码。

@@ -161,10 +161,10 @@ class ShellcodeElfLoader:
         return True
 
     def load_elf(self, filename, app_dir):
-        # 修改：python侧访问 filename, C侧访问 app_dir + filename
+        # python 侧访问 filename，C 侧访问 app_dir + filename
         print("[*] Loading ELF: {}".format(filename))
 
-        # ---- Python-side ELF diagnostics ----
+        # ---- Python 侧 ELF 诊断 ----
         # 读取并打印关键 ELF Header / Program Header 字段。
         elf_info = None
         try:
@@ -255,7 +255,7 @@ class ShellcodeElfLoader:
             return None
         print("[*] Allocated Target Memory at: 0x{:08X}".format(self.loaded_elf_base))
 
-        # ---- Path diagnostics ----
+        # ---- 路径诊断 ----
         full_path_for_c = app_dir + "\\" + filename
         print("[ELFDBG] Python path       = " + str(filename))
         print("[ELFDBG] C loader path     = " + str(full_path_for_c))
@@ -290,7 +290,7 @@ class ShellcodeElfLoader:
                 print("[ELFDBG] target RAM probe failed: " + str(e))
 
             print("[*] Calling shellcode loader...")
-            # Shellcode: R0 = UTF-16 path, R1 = target base
+            # Shellcode：R0 = UTF-16 路径，R1 = 目标基址
             self.entry_point = self.dbg.call(
                 self.loader_addr,
                 path_addr,
@@ -338,7 +338,7 @@ class LogReader:
         self.dbg = debug_interface
         self.addr = log_struct_addr
         self.local_head = 0
-        self.log_size = 4096 # Must match C code's LOG_BUFFER_SIZE
+        self.log_size = 4096 # 必须与 C 代码的 LOG_BUFFER_SIZE 一致
 
     def process(self):
         try:
@@ -372,7 +372,7 @@ class AppConfigBuilder:
         self.dbg = dbg
         self.app_dir = app_dir
         self.allocations = []
-        # 修改：这里的路径使用 app_dir 变量
+        # 这里的路径使用 app_dir 变量
         self.args = ["my_app", "-iwad", self.app_dir + "\\doom1.wad"]
         self.envs = {"HOME": self.app_dir}
         self.keys = []
@@ -389,7 +389,7 @@ class AppConfigBuilder:
         size = len(pointers) * 4
         if size == 0: return 0
         addr = self.dbg.call(ADDR_MALLOC, size)
-        # 修改：避免使用f-string
+        # 避免使用 f-string（MicroPython 兼容）
         pack_format = "<" + "I" * len(pointers)
         self.dbg.write_mem_bytes(addr, struct.pack(pack_format, *pointers))
         self.allocations.append(addr)
@@ -403,7 +403,7 @@ class AppConfigBuilder:
         env_array_addr = 0 # 简化，可以按需实现
         key_array_addr = 0 # 简化
 
-        config_size = 28 # 7 * 4 bytes
+        config_size = 28 # 7 * 4 字节
         config_addr = self.dbg.call(ADDR_MALLOC, config_size)
         
         MAGIC = 0xD00BC760 
@@ -419,7 +419,7 @@ class AppConfigBuilder:
             self.dbg.call(ADDR_FREE, addr)
         self.allocations = []
 
-# --- 主执行函数 (已修改，移除了f-string和time模块) ---
+# --- 主执行函数 ---
 def run_app(elf_filename, app_dir_for_c, enable_config=True, enable_logging=True):
     print("--- HP Prime App Loader ---")
     print("  - App: " + elf_filename)
@@ -437,7 +437,7 @@ def run_app(elf_filename, app_dir_for_c, enable_config=True, enable_logging=True
         if not loader.upload_loader():
             raise RuntimeError("Failed to upload shellcode loader")
         
-        # 修改：传入C代码需要的完整路径前缀
+        # 传入 C 代码需要的完整路径前缀
         entry_point = loader.load_elf(elf_filename, app_dir_for_c)
         if not entry_point:
             raise RuntimeError("Failed to load ELF file")
@@ -473,7 +473,7 @@ def run_app(elf_filename, app_dir_for_c, enable_config=True, enable_logging=True
         print("\n--- Streaming Logs (Press Ctrl+C to stop) ---")
         while True:
             logger.process()
-            # 修改：使用 hpprime.ticks() 来实现非阻塞延时，替代 time.sleep()
+            # 用 hpprime.ticks() 实现非阻塞延时，替代 time.sleep()
             start_ticks = hpprime.ticks()
             while hpprime.ticks() - start_ticks < 100: # 延时约100ms
                 pass

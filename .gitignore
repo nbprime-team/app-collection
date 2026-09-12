@@ -8,8 +8,10 @@
 # 用户直接拷贝目录即可运行，不需先构建。
 !*/*/*.hpappdir/my_app.elf
 
-# 由 tools/fontgen.py 从 font/unifont-*.hex 生成的字体源（make 会自动重建）
-examples/suika/unifont_font.c
-examples/suika/unifont_font.h
+# 由 resources/prime-unifont/fontgen.py 从 unifont-*.hex 生成的字体源（共享一份）
+resources/prime-unifont/unifont_font.c
+resources/prime-unifont/unifont_font.h
+
+# staging/prime-code 仍自带一份字体源（本轮未改）
 staging/prime-code/unifont_font.c
 staging/prime-code/unifont_font.h

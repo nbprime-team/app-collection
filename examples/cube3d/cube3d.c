@@ -3,22 +3,22 @@
  *
  * ⚠️ AI 生成 / 辅助创作：DeepSeek V4.1 Flash（未人工审查）
  *
- * 迭代记录（真机反馈）：
- *   v1：文字左右翻转、屏闪、按键无响应。
- *   v2（本版）修正：
- *     - 文字镜像：字模数据是 **LSB 在左**，渲染位序改为 `(bits >> col) & 1`
- *       （此前用 `0x80 >> col` 即 MSB 在左，导致每个字符镜像）；
- *     - 屏闪：改为**离屏 framebuf 渲染 + 每帧一次 blit**（与 suika 一致），
- *       不再直接写 LCD；
- *     - 输入：改为 suika 的解析方式（仅触屏版）——触摸拖动旋转，
- *       **任意键退出**。注意 prime_sys_get_event 的返回值不可靠，
- *       由 SDK 的 hook 统一处理（见 toolchain/sdk/prime_hook.c）。
+ * 用途：演示不依赖 hp_* 运行时、直接用固件接口自建渲染；
+ * 旋转与投影公式取自 legacy/prime-mc/MC KMAT.hpappdir/KM3D.py，在 C 里
+ * 用软浮点重写（TCC-ARM 无原生浮点）。
  *
- * 输入方式为**仅触屏**（同 suika）：不依赖键码映射表。
+ * 实现要点：
+ *   - 320x240 ARGB 帧缓冲：prime_sys_get_lcd() 取 LCD 对象，vtable + 0x10 处是缓冲；
+ *   - 离屏 framebuf 渲染 + 每帧一次整屏 blit（避免屏闪/抄裂）；
+ *   - 文字用共享字体资源 app-collection/resources/prime-unifont
+ *     （GNU Unifont 的 ASCII 子集，与 suika 同源）；
+ *   - 输入经 toolchain/sdk 的固件输入钩子（prime_hook.h）；仅触屏，
+ *     触摸拖动旋转、任意键退出。
  */
 
 #include <stdint.h>
 #include "prime_hook.h"        /* 输入钩子：取事件必须用它，不能轮询 */
+#include "unifont_draw.h"      /* 共享字体资源（GNU Unifont ASCII 子集） */
 
 #define LCD_W 320
 #define LCD_H 240
@@ -174,55 +174,6 @@ static void line(uint32_t *fb, int x0, int y0, int x1, int y1, uint32_t color)
     }
 }
 
-/* ---- 极简 8×8 字模（只含本示例用到的字符；数据为 LSB 在左） ---- */
-
-static const char glyph_chars[] = " 3ABCDEGIKNORSTUWXY";
-static const uint8_t glyph_bits[][8] = {
-    { 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00 }, /* ' ' */
-    { 0x3c,0x66,0x60,0x38,0x60,0x66,0x3c,0x00 }, /* 3 */
-    { 0x3c,0x66,0x66,0x7e,0x66,0x66,0x66,0x00 }, /* A */
-    { 0x7c,0x66,0x66,0x7c,0x66,0x66,0x7c,0x00 }, /* B */
-    { 0x3c,0x66,0x06,0x06,0x06,0x66,0x3c,0x00 }, /* C */
-    { 0x3e,0x66,0x66,0x66,0x66,0x66,0x3e,0x00 }, /* D */
-    { 0x7e,0x06,0x06,0x3e,0x06,0x06,0x7e,0x00 }, /* E */
-    { 0x3c,0x66,0x60,0x60,0x6e,0x66,0x3c,0x00 }, /* G */
-    { 0x3c,0x18,0x18,0x18,0x18,0x18,0x3c,0x00 }, /* I */
-    { 0x66,0x66,0x6c,0x78,0x6c,0x66,0x66,0x00 }, /* K */
-    { 0x66,0x6e,0x7e,0x7e,0x76,0x66,0x66,0x00 }, /* N */
-    { 0x3c,0x66,0x66,0x66,0x66,0x66,0x3c,0x00 }, /* O */
-    { 0x3e,0x66,0x66,0x3e,0x66,0x66,0x66,0x00 }, /* R */
-    { 0x3c,0x66,0x06,0x1c,0x60,0x66,0x3c,0x00 }, /* S */
-    { 0x7e,0x18,0x18,0x18,0x18,0x18,0x18,0x00 }, /* T */
-    { 0x66,0x66,0x66,0x66,0x66,0x66,0x3c,0x00 }, /* U */
-    { 0x63,0x63,0x63,0x6b,0x7f,0x77,0x63,0x00 }, /* W */
-    { 0x66,0x66,0x3c,0x18,0x3c,0x66,0x66,0x00 }, /* X */
-    { 0x66,0x66,0x3c,0x18,0x18,0x18,0x18,0x00 }, /* Y */
-};
-
-static int glyph_index(char c)
-{
-    int i;
-    for (i = 0; glyph_chars[i]; ++i) {
-        if (glyph_chars[i] == c) return i;
-        if (c >= 'a' && c <= 'z' && glyph_chars[i] == c - 32) return i;
-    }
-    return 0;                                /* 未收录 -> 空格 */
-}
-
-static void text(uint32_t *fb, int x, int y, const char *s, uint32_t color)
-{
-    for (; *s; ++s, x += 9) {
-        const uint8_t *g = glyph_bits[glyph_index(*s)];
-        int row, col;
-        for (row = 0; row < 8; ++row) {
-            for (col = 0; col < 8; ++col) {
-                /* 字模为 LSB 在左：第 col 列对应第 col 位 */
-                if ((g[row] >> col) & 1u) put_px(fb, x + col, y + row, color);
-            }
-        }
-    }
-}
-
 /* ---- 输入：固件钩子（仅触屏版，同 suika） ---- */
 
 static volatile int   g_quit;
@@ -234,8 +185,11 @@ static volatile int   g_last_x, g_last_y, g_dragging;
 static void on_event(void *event)
 {
     uint8_t *p = (uint8_t *)event;
-    uint32_t type = rd32(p + 4);
+    uint32_t type;
     int count, i;
+
+    prime_sys_get_event(event);                 /* 取事件（SVC #0x1003f）；trampoline 直达本回调 */
+    type = rd32(p + 4);
 
     if (type == EV_KEY) {                       /* 任意键 -> 退出 */
         int action = rd16(p + 28);
@@ -293,9 +247,9 @@ static void render(uint32_t *fb, float ax, float ay)
         put_px(fb, ix[i], iy[i], C_VERT);
     }
 
-    text(fb, 8, 8, "CUBE3D", C_HUD);
-    text(fb, 8, LCD_H - 28, "DRAG TO ROTATE", C_HUD);
-    text(fb, 8, LCD_H - 16, "ANY KEY EXIT", C_HUD);
+    unifont_draw_text(fb, LCD_W, LCD_H, 8, 8, "CUBE3D", 1, 1, C_HUD);
+    unifont_draw_text(fb, LCD_W, LCD_H, 8, LCD_H - 32, "DRAG TO ROTATE", 1, 1, C_HUD);
+    unifont_draw_text(fb, LCD_W, LCD_H, 8, LCD_H - 16, "ANY KEY EXIT", 1, 1, C_HUD);
 }
 
 /* 把 main 顶到非 0 地址（见上方说明） */
@@ -317,7 +271,7 @@ int main(void *config, void *reserved)
     if (!lcd) return 0;
 
     if (!prime_hook_install(on_event)) {
-        text(framebuf, 8, 8, "HOOK FAILED", C_HUD);
+        unifont_draw_text(framebuf, LCD_W, LCD_H, 8, 8, "HOOK FAILED", 1, 1, C_HUD);
         blit_fb(lcd, framebuf);
         return 1;
     }

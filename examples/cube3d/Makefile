@@ -5,57 +5,22 @@
 #   make            编译 -> cube3d.elf
 #   make check      readelf 检查 ELF 形状
 #   make deploy     产出可上传包 cube3d.hpappdir/
+#   make font       只生成字体源
 #   make clean
 #
-# 本示例**自包含**：不依赖 hp_* 运行时（其实现缺失），也不需要 unifont 字体，
-# 因此只有单个源文件；链接脚本来自 prime-tcc SDK。
-#
-# 注意 ARMCC 不能用 CC（CC 是 make 内置变量，`CC ?=` 不会生效）。
+# 本示例**自包含**：不依赖 hp_* 运行时（其实现缺失）；文字与 suika 共用
+# app-collection/resources/prime-unifont。公共规则见 toolchain/templates/app.mk。
 
-ARMCC    ?= arm-none-eabi-gcc
-READELF  ?= arm-none-eabi-readelf
-SDK      ?= ../../../toolchain
+SDK    ?= ../../../toolchain
+TARGET := cube3d
+APPDIR := $(TARGET).hpappdir
 
-TARGET   := cube3d
-APPDIR   := $(TARGET).hpappdir
-# prime_input.S（来自 SDK）提供 prime_sys_* 的 SVC 包装，所有应用都需要
-OBJS     := $(TARGET).o prime_input.o prime_hook.o
+# prime_input.S（来自 SDK）提供 prime_sys_* 的 SVC 包装，所有应用都需要；
+# 输入钩子统一走 SDK 的 prime_hook.c。
+OBJS   := $(TARGET).o prime_input.o prime_hook.o
 
-CFLAGS   := -mcpu=arm926ej-s -marm -mfloat-abi=soft \
-            -fPIC -ffreestanding -fno-strict-aliasing -fno-builtin \
-            -fno-stack-protector -fno-unwind-tables -fno-asynchronous-unwind-tables \
-            -O2 -Wall -Wextra -I$(SDK)/sdk
+include $(SDK)/templates/app.mk
+include ../../resources/prime-unifont/unifont.mk
 
-LDFLAGS  := -shared -nostdlib -nodefaultlibs -nostartfiles \
-            -Wl,-Bsymbolic -Wl,--no-undefined -Wl,--build-id=none \
-            -Wl,-z,norelro -Wl,-z,max-page-size=0x1000 -Wl,--hash-style=sysv \
-            -Wl,-T,$(SDK)/sdk/prime_dyn.ld
-
-LDLIBS   := -lgcc
-
-.PHONY: all check deploy clean
-
-all: $(TARGET).elf
-
-$(TARGET).elf: $(OBJS) $(SDK)/sdk/prime_dyn.ld
-	$(ARMCC) $(CFLAGS) $(LDFLAGS) -o $@ $(OBJS) $(LDLIBS)
-
-$(TARGET).o: $(TARGET).c
-	$(ARMCC) $(CFLAGS) -c -o $@ $<
-
-prime_input.o: $(SDK)/sdk/prime_input.S
-	$(ARMCC) $(CFLAGS) -c -o $@ $<
-
-prime_hook.o: $(SDK)/sdk/prime_hook.c $(SDK)/sdk/prime_hook.h
-	$(ARMCC) $(CFLAGS) -c -o $@ $<
-
-check: $(TARGET).elf
-	$(READELF) -h -l -d -r $<
-
-# 产出一个可直接拷入计算器的包（C:\DATA\cube3d.hpappdir）
-deploy: $(TARGET).elf
-	cp -f $(TARGET).elf $(APPDIR)/my_app.elf
-	@echo "==> $(APPDIR)/ 已就绪（含 main.py + 元数据 + my_app.elf）"
-
-clean:
-	rm -f $(TARGET).o prime_input.o prime_hook.o $(TARGET).elf
+# 字体头由 unifont.mk 生成，先于本工程源编译
+$(TARGET).o: $(UNIFONT_H)

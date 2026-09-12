@@ -1,5 +1,6 @@
 #include <stdint.h>
-#include "unifont_font.h"
+#include "prime_hook.h"        /* SDK：固件输入钩子（取事件必须用它，不能轮询） */
+#include "unifont_draw.h"      /* 共享字体资源（GNU Unifont ASCII 子集） */
 
 #define LCD_W 320
 #define LCD_H 240
@@ -19,13 +20,8 @@
 #define TOUCH_MOVE 2u
 #define TOUCH_END 8u
 
-/* PureDOOM install_input_hack() target from the supplied puredoom.elf. */
-#define INPUT_HOOK_TARGET 0x307FBFA0u
-
 extern void *prime_sys_get_lcd(void);
 extern void prime_sys_sleep(uint32_t ms);
-extern void prime_sys_get_event(void *event);
-extern void prime_privileged_memcpy(void *dst, const void *src, uint32_t size);
 
 /* Keep at least one runtime relocation for the existing ELF loader. */
 static uint32_t *volatile relocation_anchor = (uint32_t *)&relocation_anchor;
@@ -38,9 +34,6 @@ static volatile int g_touch_y;
 static volatile int g_touch_state;
 static volatile uint32_t g_touch_serial;
 
-static uint8_t g_saved_input_code[16] __attribute__((aligned(4)));
-static uint32_t g_input_trampoline[2] __attribute__((aligned(4)));
-static volatile int g_hook_installed;
 
 struct Fruit {
     int active;
@@ -85,57 +78,9 @@ static uint32_t rd32(const uint8_t *p)
         | ((uint32_t)p[3] << 24);
 }
 
-/*
- * Direct reconstruction of DOOM's install_input_hack().
- * It saves 16 bytes at 0x307fbfa0, then replaces the first 8 bytes with:
- *
- *   ldr pc, [pc, #-4]
- *   .word hook_address
- */
-static void install_input_hook(void);
-static void remove_input_hook(void);
+/* 输入钩子统一走 SDK：prime_hook_install()/prime_hook_remove()（见 prime_hook.h）。
+ * 机制与 PureDOOM 的 install_input_hack() 同构：trampoline 直达本回调。 */
 static void suika_event_hook(void *event);
-
-static void install_input_hook(void)
-{
-    uint32_t target = INPUT_HOOK_TARGET;
-
-    if (g_hook_installed)
-        return;
-
-    prime_privileged_memcpy(
-        g_saved_input_code,
-        (const void *)target,
-        16
-    );
-
-    g_input_trampoline[0] = 0xE51FF004u;
-    g_input_trampoline[1] = (uint32_t)(uintptr_t)&suika_event_hook;
-
-    prime_privileged_memcpy(
-        (void *)target,
-        g_input_trampoline,
-        8
-    );
-
-    g_hook_installed = 1;
-}
-
-static void remove_input_hook(void)
-{
-    uint32_t target = INPUT_HOOK_TARGET;
-
-    if (!g_hook_installed)
-        return;
-
-    prime_privileged_memcpy(
-        (void *)target,
-        g_saved_input_code,
-        16
-    );
-
-    g_hook_installed = 0;
-}
 
 /*
  * This is intentionally close to PureDOOM's my_get_event_hook().
@@ -256,12 +201,6 @@ static void blit_fb(uint32_t *dst, const uint32_t *src)
         dst[i] = src[i];
 }
 
-static void put_pixel(uint32_t *fb, int x, int y, uint32_t color)
-{
-    if ((unsigned)x >= LCD_W || (unsigned)y >= LCD_H) return;
-    fb[y * LCD_W + x] = color;
-}
-
 static void hline(uint32_t *fb, int x0, int x1, int y, uint32_t color)
 {
     int x;
@@ -285,51 +224,6 @@ static void fill_circle(uint32_t *fb, int cx, int cy, int radius, uint32_t color
     }
 }
 
-static void draw_char(uint32_t *fb, int x, int y, char c, int scale, uint32_t color)
-{
-    uint8_t width;
-    const uint16_t *rows = unifont_glyph((unsigned char)c, &width);
-    int row, col, sx, sy;
-    for (row = 0; row < 16; ++row) {
-        uint16_t bits = rows[row];
-        for (col = 0; col < (int)width; ++col) {
-            if (bits & (uint16_t)(1u << (width - 1 - col))) {
-                for (sy = 0; sy < scale; ++sy)
-                    for (sx = 0; sx < scale; ++sx)
-                        put_pixel(fb,
-                                  x + col * scale + sx,
-                                  y + row * scale + sy,
-                                  color);
-            }
-        }
-    }
-}
-
-static int glyph_advance(char c, int scale, int gap)
-{
-    uint8_t width;
-    (void)unifont_glyph((unsigned char)c, &width);
-    return (int)width * scale + gap;
-}
-
-static void draw_text(uint32_t *fb, int x, int y, const char *s,
-                      int scale, int gap, uint32_t color)
-{
-    while (*s) {
-        char c = *s++;
-        draw_char(fb, x, y, c, scale, color);
-        x += glyph_advance(c, scale, gap);
-    }
-}
-
-static int text_width(const char *s, int scale, int gap)
-{
-    int width = 0;
-    while (*s) {
-        width += glyph_advance(*s++, scale, gap);
-    }
-    return width > 0 ? width - gap : 0;
-}
 
 static uint32_t random_u32(void)
 {
@@ -587,11 +481,11 @@ static void draw_hud(uint32_t *fb)
     }
     score_buf[n] = 0;
 
-    draw_text(fb, 8, 11, "SCORE", 2, 1, 0xFFFFFFFFu);
-    sw = text_width(score_buf, 2, 1);
+    unifont_draw_text(fb, LCD_W, LCD_H, 8, 11, "SCORE", 2, 1, 0xFFFFFFFFu);
+    sw = unifont_text_width(score_buf, 2, 1);
     (void)sw;
-    draw_text(fb, 100, 11, score_buf, 2, 1, 0xFFFFD94Au);
-    draw_text(fb, 245, 11, "NEXT", 1, 1, 0xFFB8C7D9u);
+    unifont_draw_text(fb, LCD_W, LCD_H, 100, 11, score_buf, 2, 1, 0xFFFFD94Au);
+    unifont_draw_text(fb, LCD_W, LCD_H, 245, 11, "NEXT", 1, 1, 0xFFB8C7D9u);
     hline(fb, 0, LCD_W - 1, GAME_TOP, 0xFF8C1D1Du);
 }
 
@@ -623,11 +517,11 @@ static void render(void)
         draw_fruit(framebuf, current_type, current_x, SPAWN_Y);
 
     /* Keep the exit hint above fruit sprites so it remains readable. */
-    draw_text(framebuf, 4, 222, "ANY KEY EXIT", 1, 0, 0xFFB8C7D9u);
+    unifont_draw_text(framebuf, LCD_W, LCD_H, 4, 222, "ANY KEY EXIT", 1, 0, 0xFFB8C7D9u);
 
     if (game_over) {
-        draw_text(framebuf, 78, 96, "GAME OVER", 2, 1, 0xFFFFFFFFu);
-        draw_text(framebuf, 60, 140, "TOUCH TO RESTART", 1, 0, 0xFFFFD94Au);
+        unifont_draw_text(framebuf, LCD_W, LCD_H, 78, 96, "GAME OVER", 2, 1, 0xFFFFFFFFu);
+        unifont_draw_text(framebuf, LCD_W, LCD_H, 60, 140, "TOUCH TO RESTART", 1, 0, 0xFFFFD94Au);
     }
 }
 
@@ -667,7 +561,7 @@ int main(void *config, void *reserved)
     reset_game();
 
     /* The input hook is the crucial DOOM-derived part. */
-    install_input_hook();
+    prime_hook_install(suika_event_hook);
 
     for (frame = 0; ; ++frame) {
         if (g_quit)
@@ -692,6 +586,6 @@ int main(void *config, void *reserved)
         prime_sys_sleep(FRAME_MS);
     }
 
-    remove_input_hook();
+    prime_hook_remove();
     return 0;
 }

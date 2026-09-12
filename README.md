@@ -19,26 +19,28 @@ Prime 平台的应用与工具集合。**一个项目/应用一个目录**，编
 
 | 路径 | 内容 | 可上传包 | 状态 |
 |---|---|---|---|
-| `examples/suika/` | Suika 水果游戏（DOOM 派生的固件输入钩子） | `suika.hpappdir/` | 可构建 |
+| `examples/suika/` | Suika 水果游戏（输入钩子经 SDK 的 `prime_hook`） | `suika.hpappdir/` | 可构建 |
 | `examples/cube3d/` | 3D 线框演示（自包含；移植自 legacy 的 KM3D） | `cube3d.hpappdir/` | 可构建 |
 | `staging/prime-code/` | PrimeCode 编辑器：C 实现 `primecode.c` + MicroPython 实现 | `primecode.hpappdir/` | 可构建 |
 | `staging/prime-file-manager/` | FileManager 文件管理器（MicroPython GUI） | `FileManager.hpappdir/` | 计算器应用 |
 | `tools/runelf/runelf.hpappdir/` | 通用 ELF 运行器（加载器 + 示例 `my_app.elf`） | 本身即 `.hpappdir` | 计算器工具 |
 | `resources/prime-sans/` | Prime Sans 字体（固件提取，含 CJK） | — | 资源 |
+| `resources/prime-unifont/` | GNU Unifont（ASCII 子集）与文本绘制（suika/cube3d 共用） | — | 资源 |
 
 ## 构建 / 打包
 
 ```bash
 source ../toolchain/scripts/env.sh
 make -C examples/suika deploy          # 编译 + 产出可上传包 suika.hpappdir/
-make -C examples/cube3d deploy         # 同上（自包含示例，产物 16288 B）
+make -C examples/cube3d deploy         # 同上（自包含示例，产物 18108 B）
 make -C staging/prime-code             # -> primecode.elf (24644 B)
 ```
 
-三个 C 工程的**公共构建件来自 prime-tcc SDK**（`-I prime-tcc/hp`、
-`-T toolchain/sdk/prime_dyn.ld`、`prime_input.S`），各自不再保留副本；
-`suika` 与 `prime-code` 另需 `font/unifont-17.0.04.hex`（已内置，无需联网），
-`cube3d` 自包含（无字体、无 unifont）。产物为 ELF32/DYN/ARM（soft-float）。
+三个 C 工程的**公共构建件来自 C 核心库** [`toolchain/sdk/`](../toolchain/sdk/)
+（`-I$(SDK)/sdk`、`-T$(SDK)/sdk/prime_dyn.ld`、`prime_input.S`），各自不再保留副本；
+字体与输入钩子都是共享件：`suika` 与 `cube3d` 都用
+[`resources/prime-unifont/`](resources/prime-unifont/)（hex 已内置，无需联网），
+输入钩子统一走 `toolchain/sdk/prime_hook.c`。产物为 ELF32/DYN/ARM（soft-float）。
 
 ## 新增一个应用
 
@@ -49,15 +51,27 @@ make -C staging/prime-code             # -> primecode.elf (24644 B)
    - **ELF 必须命名为 `my_app.elf`**（`APP_ELF_FILENAME` 保持默认）——加载器 Python 侧按 `filename` 打开、C 侧按 `app_dir + filename` 打开，改名会两边不一致；
    - `<name>.hpapp`、`.hpappnote`、`.hpappprgm`：应用元数据（可从 runelf 模板复制，
      **内容无关紧要**，应用名由**目录名**承载）；
-4. `Makefile`：
-   - 链接脚本用 `-T $(SDK)/sdk/prime_dyn.ld`；
-   - **必须**编译并链接 `$(SDK)/sdk/prime_input.S` —— 它提供 `prime_sys_get_lcd` /
-     `prime_sys_get_event` / `prime_sys_sleep` 的 SVC 包装（否则链接报 undefined reference）；
-   - 加 `deploy` 目标把产物拷进 `.hpappdir/`；
+4. `Makefile`：直接 include 公共片段，不必重复样板（见
+   [`toolchain/templates/app.mk`](../toolchain/templates/app.mk)）：
+
+   ```make
+   SDK    ?= ../../../toolchain
+   TARGET := <name>
+   APPDIR := $(TARGET).hpappdir        # 定义后模板才生成 deploy
+   OBJS   := $(TARGET).o prime_input.o prime_hook.o
+   include $(SDK)/templates/app.mk
+   # 需要字体时（与 suika/cube3d 同源）：
+   include ../../resources/prime-unifont/unifont.mk
+   ```
+
+   模板已提供 ARM 目标参数、`-I$(SDK)/sdk`、`-T$(SDK)/sdk/prime_dyn.ld`、
+   `prime_input.o` / `prime_hook.o` 规则与 `all` / `check` / `deploy` / `clean`。
+   `prime_input.S` 是必需项（提供 `prime_sys_get_lcd` / `prime_sys_get_event` /
+   `prime_sys_sleep` 的 SVC 包装，否则链接报 undefined reference）。
 5. 在 `.gitignore` 里忽略该产物；
 6. 更新本文件的内容表。
 
-> 参考实现：[`examples/cube3d/`](examples/cube3d/)（最小自包含工程，无字体/unifont）、
+> 参考实现：[`examples/cube3d/`](examples/cube3d/)（最小工程，字体与钩子与 suika 同源）、
 > [`examples/suika/`](examples/suika/)（含字体生成与 `deploy`）。
 
 ## 交付物：`.hpappdir/` 必须自包含
@@ -65,23 +79,6 @@ make -C staging/prime-code             # -> primecode.elf (24644 B)
 `.hpappdir/` 是**可直接拷入计算器的交付物**，因此其中的 ELF（`my_app.elf`）
 **必须入库**——`.gitignore` 用 `!` 开例外，`make clean` 也**不删**它。
 用户拿到仓库即可直接拷贝运行，**无需先构建**。
-
-（`runelf.hpappdir/my_app.elf` 一直是这样做的；此前的疏忽导致
-`suika`/`cube3d` 的包缺 ELF，`make clean` 后包里是空的。）
-
-## 整理记录
-
-- 名称依据**源码实际内容**：`primecode.c` 是编辑器、`suika_prime.c` 是水果游戏
-  （两者历史上曾被混放在同一目录）；
-- 结构：演示应用入 `examples/`，单仓库候选入 `staging/`（前缀），工具入 `tools/`，资源入 `resources/`；
-- `tools/runelf/` 包一层顶层文件夹（与其他应用同构，其下才是 `.hpappdir/`）；
-- **源码与库分离**：`prime_dyn.ld`、`prime_input.S`、`hook_abi.md`、`prime.h` 此前在每个
-  应用目录各存一份（内容已开始漂移：`prime_input.S` 两版只差注释），现统一到
-  [`toolchain/sdk/`](../toolchain/sdk/)（C 核心库的唯一权威源），应用仅通过 `$(SDK)` 引用；
-- 新增 `examples/cube3d/`（工程性示例：自包含 3D 线框，移植自 legacy 的 KM3D）；
-- 抢救自废弃仓库：`FileManager.hpappdir/`、`resources/prime-sans/`（Prime Sans）；
-- 删除：48 个 Windows `:Zone.Identifier` 残留与早期编译产物；
-- 修复：`suika/Makefile` 的 `CC ?=`（对 make 内置变量无效，会退回宿主 `cc`）。
 
 ## 未完成 / 待维护者确认
 
