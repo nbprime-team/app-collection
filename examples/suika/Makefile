@@ -26,7 +26,11 @@ LDFLAGS ?= -shared -nostdlib -nodefaultlibs -nostartfiles \
 
 LDLIBS ?= -lgcc
 
-.PHONY: all font fetch-unifont check clean
+.PHONY: all font fetch-unifont check deploy clean
+
+# 可上传包目录：结构已在仓库中（main.py + suika.hpapp*），
+# deploy 只需把构建产物放进去。
+APPDIR := suika.hpappdir
 
 all: suika_prime.elf
 
@@ -55,5 +59,11 @@ $(FONT_O): $(FONT_C) $(FONT_H)
 check: suika_prime.elf
 	$(READELF) -h -l -d -r $<
 
+# 产出一个可直接拷入计算器的包（C:\DATA\suika.hpappdir）
+deploy: suika_prime.elf
+	cp -f suika_prime.elf $(APPDIR)/suika_prime.elf
+	@echo "==> $(APPDIR)/ 已就绪（含 main.py + 元数据 + suika_prime.elf）"
+
 clean:
 	rm -f suika_prime.o prime_input.o $(FONT_O) $(FONT_C) $(FONT_H) suika_prime.elf
+	rm -f $(APPDIR)/suika_prime.elf

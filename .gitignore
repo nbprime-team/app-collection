@@ -4,8 +4,11 @@
 *.o
 *.elf
 
+# 可上传包里的产物（由 make deploy 生成；包结构本身入库）
+examples/suika/suika.hpappdir/suika_prime.elf
+
 # 由 tools/fontgen.py 从 font/unifont-*.hex 生成的字体源（make 会自动重建）
+examples/suika/unifont_font.c
+examples/suika/unifont_font.h
 examples/prime-code/unifont_font.c
 examples/prime-code/unifont_font.h
-suika/unifont_font.c
-suika/unifont_font.h
