@@ -21,6 +21,12 @@ Cube3D —— HP Prime 上的 3D 线框演示
 - 自带 8x8 字模（数据为 **LSB 在左**，故位序用 `(bits >> col) & 1`）与三角函数；
 - 输入经 toolchain/sdk 的固件钩子（见 prime_hook.h）；帧率由 `prime_sys_sleep(20)` 控制。
 
+⚠️ **两项 ELF 硬要求**（suika 的注释里写明的，缺了加载器会行为异常）：
+1. **至少保留一个运行时重定位**——用 `static uint32_t *volatile relocation_anchor = (uint32_t *)&relocation_anchor;`。
+   否则 `R_ARM_RELATIVE` 计数为 0，**退出时会重启**；
+2. **`main` 不要落在地址 0**——加 `entry_pad()`（`.text.entrypad`）并把 `main` 放进
+   `.text.main`；HP 加载器把 `return 0` 当作失败。
+
 构建
 ----
   source ../../../toolchain/scripts/env.sh
