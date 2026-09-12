@@ -29,7 +29,7 @@ Cube3D —— HP Prime 上的 3D 线框演示
 
 部署
 ----
-  make deploy      # 把产物放进 cube3d.hpappdir/
+  make deploy      # 把产物以 my_app.elf 之名放进 cube3d.hpappdir/
 然后把 cube3d.hpappdir/ 拷入计算器 C:\DATA\ 运行。
 
 状态

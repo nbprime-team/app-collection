@@ -51,9 +51,9 @@ check: $(TARGET).elf
 
 # 产出一个可直接拷入计算器的包（C:\DATA\cube3d.hpappdir）
 deploy: $(TARGET).elf
-	cp -f $(TARGET).elf $(APPDIR)/$(TARGET).elf
-	@echo "==> $(APPDIR)/ 已就绪（含 main.py + 元数据 + $(TARGET).elf）"
+	cp -f $(TARGET).elf $(APPDIR)/my_app.elf
+	@echo "==> $(APPDIR)/ 已就绪（含 main.py + 元数据 + my_app.elf）"
 
 clean:
 	rm -f $(TARGET).o prime_input.o $(TARGET).elf
-	rm -f $(APPDIR)/$(TARGET).elf
+	rm -f $(APPDIR)/my_app.elf

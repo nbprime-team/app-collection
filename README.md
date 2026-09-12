@@ -45,7 +45,8 @@ make -C staging/prime-code             # -> primecode.elf (24644 B)
 1. 按命名规则建目录（演示用 `examples/<name>/`；单仓库候选用 `staging/prime-<name>/`）；
 2. 放源码与 `Makefile`；
 3. 在顶层目录下建 `<name>.hpappdir/`，至少包含：
-   - `main.py`：计算器端加载器（ELF 运行器可直接复用 [`tools/runelf/runelf.hpappdir/main.py`](tools/runelf/runelf.hpappdir/main.py)，改 `APP_ELF_FILENAME` / `APP_DIR_FOR_C_CODE` 两个常量）；
+   - `main.py`：直接复用模范脚本 [`tools/runelf/runelf.hpappdir/main.py`](tools/runelf/runelf.hpappdir/main.py)，**只改 `APP_DIR_FOR_C_CODE` 一处**（改成实际安装路径 `C:\\DATA\\<name>.hpappdir`）；
+   - **ELF 必须命名为 `my_app.elf`**（`APP_ELF_FILENAME` 保持默认）——加载器 Python 侧按 `filename` 打开、C 侧按 `app_dir + filename` 打开，改名会两边不一致；
    - `<name>.hpapp`、`.hpappnote`、`.hpappprgm`：应用元数据（可从 runelf 模板复制，
      **内容无关紧要**，应用名由**目录名**承载）；
 4. `Makefile`：
@@ -78,6 +79,8 @@ make -C staging/prime-code             # -> primecode.elf (24644 B)
 - `staging/prime-code/README.txt` 描述的是 Suika 玩法，与 `primecode.c`（编辑器）不符；
   为避免臆断，**原文未改**。
 - 各 `.hpappdir` 内的应用标识名（含空格/大写）若改名有破坏导入的风险。
-- `tools/runelf/runelf.hpappdir/my_app.elf` 的来源与用途尚未记录。
+- `tools/runelf/runelf.hpappdir/` 是**通用的 ELF 运行器**，其 `my_app.elf` **就是可运行的
+  suika**——与 `examples/suika` 的构建产物对比：段布局、符号数(48)、重定位数(3)、
+  `STT_FILE` 全部一致，仅 `.debug_str` 差 7 字节（调试路径）。
 - `examples/suika/suika.hpappdir/` 的元数据沿用了 runelf 模板（按约定内容未动），
   大小/校验字段未与实际的 elf 对齐，**需真机验证**。

@@ -489,7 +489,7 @@ def run_app(elf_filename, app_dir_for_c, enable_config=True, enable_logging=True
         if dbg: dbg.close()
         print("--- Shutdown complete. ---")
 
-APP_ELF_FILENAME = "cube3d.elf" 
+APP_ELF_FILENAME = "my_app.elf" 
 APP_DIR_FOR_C_CODE = "C:\\DATA\\cube3d.hpappdir"
 
 run_app(APP_ELF_FILENAME, APP_DIR_FOR_C_CODE, enable_config=True, enable_logging=True)
