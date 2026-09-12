@@ -8,17 +8,18 @@ Cube3D —— HP Prime 上的 3D 线框演示
      旋转与投影公式取自 legacy/prime-mc/MC KMAT.hpappdir/KM3D.py，
      在 C 里用软浮点重写（TCC-ARM 无原生浮点）。
 
-操作
-----
-  方向键   旋转立方体
-  ESC      退出
+操作（仅触屏，同 suika）
+------------------------
+  触摸拖动   旋转立方体
+  任意键     退出
 
 实现要点
 --------
 - 320x240 ARGB 帧缓冲：`prime_sys_get_lcd()` 取 LCD 对象，vtable + 0x10 处是缓冲；
+- **离屏 `framebuf` 渲染 + 每帧一次 `blit_fb` 整屏拷贝**（直接写 LCD 会屏闪/撕裂）；
 - 每帧清屏 -> 8 顶点旋转（KM3D 的 turn）-> 透视投影（fov=130）-> Bresenham 画 12 条边；
-- 自带 8x8 字模与三角函数（不链接 libm、不需要字体文件）；
-- 帧率由 `prime_sys_sleep(20)` 控制。
+- 自带 8x8 字模（数据为 **LSB 在左**，故位序用 `(bits >> col) & 1`）与三角函数；
+- 输入经 toolchain/sdk 的固件钩子（见 prime_hook.h）；帧率由 `prime_sys_sleep(20)` 控制。
 
 构建
 ----

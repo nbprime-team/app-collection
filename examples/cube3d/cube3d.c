@@ -3,37 +3,34 @@
  *
  * ⚠️ AI 生成 / 辅助创作：DeepSeek V4.1 Flash（未人工审查）
  *
- * 这个示例演示两件事：
- *   1) 不依赖 `hp_*` 运行时（其实现尚缺，见 prime-tcc/STATUS.md），
- *      直接调用固件接口自建渲染；
- *   2) 把 legacy 的 MicroPython 程序移植为 C —— 旋转与投影公式取自
- *      legacy/prime-mc/MC KMAT.hpappdir/KM3D.py 的 turn()/to3D()，
- *      在 C 中用软浮点重写（TCC-ARM 无原生浮点）。
+ * 迭代记录（真机反馈）：
+ *   v1：文字左右翻转、屏闪、按键无响应。
+ *   v2（本版）修正：
+ *     - 文字镜像：字模数据是 **LSB 在左**，渲染位序改为 `(bits >> col) & 1`
+ *       （此前用 `0x80 >> col` 即 MSB 在左，导致每个字符镜像）；
+ *     - 屏闪：改为**离屏 framebuf 渲染 + 每帧一次 blit**（与 suika 一致），
+ *       不再直接写 LCD；
+ *     - 输入：改为 suika 的解析方式（仅触屏版）——触摸拖动旋转，
+ *       **任意键退出**。注意 prime_sys_get_event 的返回值不可靠，
+ *       由 SDK 的 hook 统一处理（见 toolchain/sdk/prime_hook.c）。
  *
- * 固件接口（与 app-collection 内其他应用用法一致）：
- *   prime_sys_get_lcd()     → LCD 对象；其 vtable + 0x10 处是 320×240 ARGB 帧缓冲
- *   prime_sys_get_event(e)  → 非 0 表示有事件；e[1]=type，e[7]&0xffff=键 ID
- *   prime_sys_sleep(ms)     → 毫秒休眠（帧率控制）
- *
- * 操作：方向键旋转；ESC 退出。
- * 本文件只保证**编译通过**与结构正确，真机行为未验证。
+ * 输入方式为**仅触屏**（同 suika）：不依赖键码映射表。
  */
 
 #include <stdint.h>
-#include "prime_hook.h"        /* 输入句柄：取事件必须用它，不能轮询 */
+#include "prime_hook.h"        /* 输入钩子：取事件必须用它，不能轮询 */
 
 #define LCD_W 320
 #define LCD_H 240
 
-/* 事件类型 / 键 ID（与固件一致） */
-#define EV_KEY     0x00100010u
-#define EV_KEYDOWN 0x10u
-
-#define HP_ESC   4
-#define HP_UP    2
-#define HP_DOWN  12
-#define HP_LEFT  7
-#define HP_RIGHT 8
+/* 事件常量（取值与 suika 一致；prime-code 的实现有误，未参考） */
+#define EV_TICK       15u
+#define EV_KEY        0x00100010u
+#define KEY_DOWN      16u
+#define KEY_UP        0x00100000u
+#define TOUCH_BEGIN   1u
+#define TOUCH_MOVE    2u
+#define TOUCH_END     8u
 
 /* ARGB8888 */
 #define C_BG   0xff0a0f14u
@@ -43,6 +40,19 @@
 
 extern void *prime_sys_get_lcd(void);
 extern void  prime_sys_sleep(uint32_t ms);
+
+/* ---- 小端读取（事件缓冲按字节偏移访问；suika 同样如此） ---- */
+
+static uint32_t rd32(const uint8_t *p)
+{
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+           ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+static int rd16(const uint8_t *p)
+{
+    return (int)((uint16_t)p[0] | ((uint16_t)p[1] << 8));
+}
 
 /* ---- 自带的三角函数（避免链接 libm；软浮点下够用） ---- */
 
@@ -81,7 +91,7 @@ static const int cube_edges[12][2] = {
     { 0, 4 }, { 1, 5 }, { 2, 6 }, { 3, 7 },
 };
 
-/* 绕 Y 再绕 X 旋转 —— 与 KM3D.turn(dtc=[cy,sy,cx,sx]) 等价 */
+/* 绕 Y 再绕 X 旋转 —— 与 legacy/prime-mc 的 KM3D.turn() 等价 */
 static vec3 turn(vec3 p, float cy, float sy, float cx, float sx)
 {
     float x2 = p.x * cy - p.z * sy;
@@ -92,7 +102,6 @@ static vec3 turn(vec3 p, float cy, float sy, float cx, float sx)
     return (vec3){ x2, y3, z3 };
 }
 
-/* 透视投影 —— 与 KM3D 的取景一致（fov_N=130），相机沿 z 后退 */
 #define FOV_F   130.0f
 #define CAM_Z   4.0f
 
@@ -101,13 +110,15 @@ static void project(vec3 p, int *px, int *py)
     float z = p.z + CAM_Z;
     float s;
 
-    if (z < 0.1f) z = 0.1f;                 /* 近平面保护，避免除零 */
+    if (z < 0.1f) z = 0.1f;                 /* 近平面保护 */
     s = FOV_F / z;
     *px = LCD_W / 2 + (int)(p.x * s);
     *py = LCD_H / 2 - (int)(p.y * s);       /* 屏幕 Y 向下 */
 }
 
-/* ---- 绘图 ---- */
+/* ---- 离屏帧缓冲（消除屏闪：渲染完成后整屏拷贝，同 suika） ---- */
+
+static uint32_t framebuf[LCD_W * LCD_H] __attribute__((aligned(32)));
 
 static uint32_t *lcd_framebuffer(void)
 {
@@ -119,7 +130,13 @@ static uint32_t *lcd_framebuffer(void)
     return table ? *(uint32_t **)((uint8_t *)table + 0x10) : 0;
 }
 
-static void clear(uint32_t *fb, uint32_t color)
+static void blit_fb(uint32_t *dst, const uint32_t *src)
+{
+    int i;
+    for (i = 0; i < LCD_W * LCD_H; ++i) dst[i] = src[i];
+}
+
+static void clear_fb(uint32_t *fb, uint32_t color)
 {
     int i;
     for (i = 0; i < LCD_W * LCD_H; ++i) fb[i] = color;
@@ -127,7 +144,7 @@ static void clear(uint32_t *fb, uint32_t color)
 
 static void put_px(uint32_t *fb, int x, int y, uint32_t color)
 {
-    if (x < 0 || x >= LCD_W || y < 0 || y >= LCD_H) return;
+    if ((unsigned)x >= LCD_W || (unsigned)y >= LCD_H) return;
     fb[y * LCD_W + x] = color;
 }
 
@@ -152,7 +169,7 @@ static void line(uint32_t *fb, int x0, int y0, int x1, int y1, uint32_t color)
     }
 }
 
-/* ---- 极简 8×8 字模（只含本示例用到的字符，无占位） ---- */
+/* ---- 极简 8×8 字模（只含本示例用到的字符；数据为 LSB 在左） ---- */
 
 static const char glyph_chars[] = " 3ABCDEIORSTUWX";
 static const uint8_t glyph_bits[][8] = {
@@ -178,8 +195,7 @@ static int glyph_index(char c)
     int i;
     for (i = 0; glyph_chars[i]; ++i) {
         if (glyph_chars[i] == c) return i;
-        if (glyph_chars[i] >= 'A' && glyph_chars[i] <= 'Z' &&
-            c >= 'a' && c <= 'z' && glyph_chars[i] == c - 32) return i;
+        if (c >= 'a' && c <= 'z' && glyph_chars[i] == c - 32) return i;
     }
     return 0;                                /* 未收录 -> 空格 */
 }
@@ -191,15 +207,61 @@ static void text(uint32_t *fb, int x, int y, const char *s, uint32_t color)
         int row, col;
         for (row = 0; row < 8; ++row) {
             for (col = 0; col < 8; ++col) {
-                if (g[row] & (0x80u >> col)) put_px(fb, x + col, y + row, color);
+                /* 字模为 LSB 在左：第 col 列对应第 col 位 */
+                if ((g[row] >> col) & 1u) put_px(fb, x + col, y + row, color);
             }
         }
     }
 }
 
-/* ---- 场景 ---- */
+/* ---- 输入：固件钩子（仅触屏版，同 suika） ---- */
 
-#define STEP_ROT 0.12f
+static volatile int   g_quit;
+static volatile float g_ax = 0.35f;      /* 绕 X 倾角 */
+static volatile float g_ay = 0.60f;      /* 绕 Y 偏角 */
+static volatile int   g_last_x, g_last_y, g_dragging;
+
+/* 在固件分发上下文中执行：只置标志/累积角度，重活留给主循环 */
+static void on_event(void *event)
+{
+    uint8_t *p = (uint8_t *)event;
+    uint32_t type = rd32(p + 4);
+    int count, i;
+
+    if (type == EV_KEY) {                       /* 任意键 -> 退出 */
+        int action = rd16(p + 28);
+        if (action == (int)KEY_DOWN || action == (int)KEY_UP) g_quit = 1;
+        return;
+    }
+
+    if (type != EV_TICK) return;                /* 15：触摸帧 */
+
+    count = rd16(p + 24);
+    if (count > 8) count = 8;
+    if (count < 0) count = 0;
+
+    for (i = 0; i < count; ++i) {
+        uint8_t *m = p + 28 + i * 12;
+        int action = rd16(m + 0);
+        int valid  = rd16(m + 4);
+        int x      = rd16(m + 6);
+        int y      = rd16(m + 8);
+
+        if (valid != 0) continue;               /* 与 suika 相同的有效性判断 */
+
+        if (action == (int)TOUCH_BEGIN) {
+            g_last_x = x; g_last_y = y; g_dragging = 1;
+        } else if (action == (int)TOUCH_MOVE && g_dragging) {
+            g_ay += (float)(x - g_last_x) * 0.010f;   /* 横向拖动 -> 绕 Y */
+            g_ax += (float)(y - g_last_y) * 0.010f;   /* 纵向拖动 -> 绕 X */
+            g_last_x = x; g_last_y = y;
+        } else if (action == (int)TOUCH_END) {
+            g_dragging = 0;
+        }
+    }
+}
+
+/* ---- 场景 ---- */
 
 static void render(uint32_t *fb, float ax, float ay)
 {
@@ -208,7 +270,7 @@ static void render(uint32_t *fb, float ax, float ay)
     float cy = fcos(ay), sy = fsin(ay);
     int i;
 
-    clear(fb, C_BG);
+    clear_fb(fb, C_BG);
 
     for (i = 0; i < 8; ++i) {
         vec3 r = turn(cube_verts[i], cy, sy, cx, sx);
@@ -223,35 +285,8 @@ static void render(uint32_t *fb, float ax, float ay)
     }
 
     text(fb, 8, 8, "CUBE3D", C_HUD);
-    text(fb, 8, LCD_H - 16, "ARROWS ROTATE", C_HUD);
-    text(fb, 8, LCD_H - 28, "ESC EXIT", C_HUD);
-}
-
-/* ---- 输入（通过固件句柄，见 toolchain/sdk/prime_hook.h）----
- *
- * `prime_sys_get_event` 走 SVC #0x1003f，**不能在循环里轮询**——
- * 之前直接轮询的表现是：能加载、入口被调用，但随即卡死。
- * 正确做法是挂句柄，由固件在分发事件时回调我们。
- */
-static volatile int   g_quit;
-static volatile float g_ax = 0.35f;
-static volatile float g_ay = 0.60f;
-
-/* 句柄回调：在固件上下文中执行，只置标志，重活留给主循环 */
-static void on_event(void *event)
-{
-    uint32_t *e = (uint32_t *)event;
-
-    if (e[1] != EV_KEY && e[1] != EV_KEYDOWN) return;
-
-    switch ((int)(e[7] & 0xffffu)) {
-    case HP_ESC:   g_quit = 1;         break;
-    case HP_UP:    g_ax -= STEP_ROT;   break;
-    case HP_DOWN:  g_ax += STEP_ROT;   break;
-    case HP_LEFT:  g_ay -= STEP_ROT;   break;
-    case HP_RIGHT: g_ay += STEP_ROT;   break;
-    default: break;
-    }
+    text(fb, 8, LCD_H - 28, "DRAG TO ROTATE", C_HUD);
+    text(fb, 8, LCD_H - 16, "ANY KEY EXIT", C_HUD);
 }
 
 int main(void *config, void *reserved)
@@ -263,13 +298,14 @@ int main(void *config, void *reserved)
     if (!lcd) return 0;
 
     if (!prime_hook_install(on_event)) {
-        /* 句柄装不上就别进死循环（否则永远收不到输入） */
-        text(lcd, 8, 8, "HOOK FAILED", C_HUD);
+        text(framebuf, 8, 8, "HOOK FAILED", C_HUD);
+        blit_fb(lcd, framebuf);
         return 1;
     }
 
     while (!g_quit) {
-        render(lcd, (float)g_ax, (float)g_ay);
+        render(framebuf, (float)g_ax, (float)g_ay);
+        blit_fb(lcd, framebuf);            /* 每帧一次整屏拷贝，避免撕裂/屏闪 */
         prime_sys_sleep(20);
     }
 
