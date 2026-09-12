@@ -36,7 +36,7 @@ make -C staging/prime-code             # -> primecode.elf (24644 B)
 ```
 
 三个 C 工程的**公共构建件来自 prime-tcc SDK**（`-I prime-tcc/hp`、
-`-T prime-tcc/sdk/prime_dyn.ld`、`prime_input.S`），各自不再保留副本；
+`-T toolchain/sdk/prime_dyn.ld`、`prime_input.S`），各自不再保留副本；
 `suika` 与 `prime-code` 另需 `font/unifont-17.0.04.hex`（已内置，无需联网），
 `cube3d` 自包含（无字体、无 unifont）。产物为 ELF32/DYN/ARM（soft-float）。
 
@@ -68,7 +68,7 @@ make -C staging/prime-code             # -> primecode.elf (24644 B)
 - `tools/runelf/` 包一层顶层文件夹（与其他应用同构，其下才是 `.hpappdir/`）；
 - **源码与库分离**：`prime_dyn.ld`、`prime_input.S`、`hook_abi.md`、`prime.h` 此前在每个
   应用目录各存一份（内容已开始漂移：`prime_input.S` 两版只差注释），现统一到
-  `prime-tcc/sdk/` 与 `prime-tcc/hp/`，应用仅通过 `$(SDK)` 引用；
+  [`toolchain/sdk/`](../toolchain/sdk/)（C 核心库的唯一权威源），应用仅通过 `$(SDK)` 引用；
 - 新增 `examples/cube3d/`（工程性示例：自包含 3D 线框，移植自 legacy 的 KM3D）；
 - 抢救自废弃仓库：`FileManager.hpappdir/`、`resources/prime-sans/`（Prime Sans）；
 - 删除：48 个 Windows `:Zone.Identifier` 残留与早期编译产物；

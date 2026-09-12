@@ -20,10 +20,10 @@
  */
 
 #include <stdint.h>
+#include "prime_hook.h"        /* 输入句柄：取事件必须用它，不能轮询 */
 
 #define LCD_W 320
 #define LCD_H 240
-#define EVENT_WORDS 18
 
 /* 事件类型 / 键 ID（与固件一致） */
 #define EV_KEY     0x00100010u
@@ -42,7 +42,6 @@
 #define C_HUD  0xffb8c7d9u
 
 extern void *prime_sys_get_lcd(void);
-extern int   prime_sys_get_event(void *event);
 extern void  prime_sys_sleep(uint32_t ms);
 
 /* ---- 自带的三角函数（避免链接 libm；软浮点下够用） ---- */
@@ -228,34 +227,52 @@ static void render(uint32_t *fb, float ax, float ay)
     text(fb, 8, LCD_H - 28, "ESC EXIT", C_HUD);
 }
 
+/* ---- 输入（通过固件句柄，见 toolchain/sdk/prime_hook.h）----
+ *
+ * `prime_sys_get_event` 走 SVC #0x1003f，**不能在循环里轮询**——
+ * 之前直接轮询的表现是：能加载、入口被调用，但随即卡死。
+ * 正确做法是挂句柄，由固件在分发事件时回调我们。
+ */
+static volatile int   g_quit;
+static volatile float g_ax = 0.35f;
+static volatile float g_ay = 0.60f;
+
+/* 句柄回调：在固件上下文中执行，只置标志，重活留给主循环 */
+static void on_event(void *event)
+{
+    uint32_t *e = (uint32_t *)event;
+
+    if (e[1] != EV_KEY && e[1] != EV_KEYDOWN) return;
+
+    switch ((int)(e[7] & 0xffffu)) {
+    case HP_ESC:   g_quit = 1;         break;
+    case HP_UP:    g_ax -= STEP_ROT;   break;
+    case HP_DOWN:  g_ax += STEP_ROT;   break;
+    case HP_LEFT:  g_ay -= STEP_ROT;   break;
+    case HP_RIGHT: g_ay += STEP_ROT;   break;
+    default: break;
+    }
+}
+
 int main(void *config, void *reserved)
 {
     uint32_t *lcd = lcd_framebuffer();
-    uint32_t event[EVENT_WORDS];
-    float ax = 0.35f, ay = 0.60f;
-    int quit = 0;
 
     (void)config;
     (void)reserved;
-
     if (!lcd) return 0;
 
-    while (!quit) {
-        if (prime_sys_get_event(event)) {
-            uint32_t type = event[1];
-            if (type == EV_KEY || type == EV_KEYDOWN) {
-                switch ((int)(event[7] & 0xffffu)) {
-                case HP_ESC:   quit = 1;        break;
-                case HP_UP:    ax -= STEP_ROT;  break;
-                case HP_DOWN:  ax += STEP_ROT;  break;
-                case HP_LEFT:  ay -= STEP_ROT;  break;
-                case HP_RIGHT: ay += STEP_ROT;  break;
-                default: break;
-                }
-            }
-        }
-        render(lcd, ax, ay);
+    if (!prime_hook_install(on_event)) {
+        /* 句柄装不上就别进死循环（否则永远收不到输入） */
+        text(lcd, 8, 8, "HOOK FAILED", C_HUD);
+        return 1;
+    }
+
+    while (!g_quit) {
+        render(lcd, (float)g_ax, (float)g_ay);
         prime_sys_sleep(20);
     }
+
+    prime_hook_remove();
     return 0;
 }

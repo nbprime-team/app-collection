@@ -25,7 +25,7 @@ Cube3D —— HP Prime 上的 3D 线框演示
   source ../../../toolchain/scripts/env.sh
   make clean && make
 输出 cube3d.elf（ELF32/DYN/ARM，soft-float）。
-链接脚本取自 prime-tcc SDK（../../../prime-tcc/sdk/prime_dyn.ld）。
+链接脚本与输入钩子取自 toolchain SDK（../../../toolchain/sdk/）。
 
 部署
 ----

@@ -14,17 +14,17 @@
 
 ARMCC    ?= arm-none-eabi-gcc
 READELF  ?= arm-none-eabi-readelf
-SDK      ?= ../../../prime-tcc
+SDK      ?= ../../../toolchain
 
 TARGET   := cube3d
 APPDIR   := $(TARGET).hpappdir
 # prime_input.S（来自 SDK）提供 prime_sys_* 的 SVC 包装，所有应用都需要
-OBJS     := $(TARGET).o prime_input.o
+OBJS     := $(TARGET).o prime_input.o prime_hook.o
 
 CFLAGS   := -mcpu=arm926ej-s -marm -mfloat-abi=soft \
             -fPIC -ffreestanding -fno-strict-aliasing -fno-builtin \
             -fno-stack-protector -fno-unwind-tables -fno-asynchronous-unwind-tables \
-            -O2 -Wall -Wextra
+            -O2 -Wall -Wextra -I$(SDK)/sdk
 
 LDFLAGS  := -shared -nostdlib -nodefaultlibs -nostartfiles \
             -Wl,-Bsymbolic -Wl,--no-undefined -Wl,--build-id=none \
@@ -46,6 +46,9 @@ $(TARGET).o: $(TARGET).c
 prime_input.o: $(SDK)/sdk/prime_input.S
 	$(ARMCC) $(CFLAGS) -c -o $@ $<
 
+prime_hook.o: $(SDK)/sdk/prime_hook.c $(SDK)/sdk/prime_hook.h
+	$(ARMCC) $(CFLAGS) -c -o $@ $<
+
 check: $(TARGET).elf
 	$(READELF) -h -l -d -r $<
 
@@ -55,5 +58,5 @@ deploy: $(TARGET).elf
 	@echo "==> $(APPDIR)/ 已就绪（含 main.py + 元数据 + my_app.elf）"
 
 clean:
-	rm -f $(TARGET).o prime_input.o $(TARGET).elf
+	rm -f $(TARGET).o prime_input.o prime_hook.o $(TARGET).elf
 	rm -f $(APPDIR)/my_app.elf

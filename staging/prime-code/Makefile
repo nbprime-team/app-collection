@@ -5,7 +5,7 @@ PYTHON ?= python3
 
 # 构建件（prime.h / prime_dyn.ld / prime_input.S）统一来自 prime-tcc SDK，
 # 本目录不再保留副本（详见 $(SDK)/sdk/README.md）
-SDK ?= ../../../prime-tcc
+SDK ?= ../../../toolchain
 
 UNIFONT_VERSION := 17.0.04
 FONT_DIR := font
@@ -22,7 +22,7 @@ CFLAGS ?= -mcpu=arm926ej-s -march=armv5te -marm -mfloat-abi=soft \
           -fPIC -ffreestanding -fno-strict-aliasing -fno-builtin \
           -fno-stack-protector -fno-unwind-tables -fno-asynchronous-unwind-tables \
           -O2 -Wall -Wextra
-CFLAGS += -I$(SDK)/hp
+CFLAGS += -I$(SDK)/sdk
 
 LDFLAGS ?= -shared -nostdlib -nodefaultlibs -nostartfiles \
            -Wl,-Bsymbolic -Wl,--no-undefined -Wl,--build-id=none \
