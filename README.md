@@ -60,6 +60,15 @@ make -C staging/prime-code             # -> primecode.elf (24644 B)
 > 参考实现：[`examples/cube3d/`](examples/cube3d/)（最小自包含工程，无字体/unifont）、
 > [`examples/suika/`](examples/suika/)（含字体生成与 `deploy`）。
 
+## 交付物：`.hpappdir/` 必须自包含
+
+`.hpappdir/` 是**可直接拷入计算器的交付物**，因此其中的 ELF（`my_app.elf`）
+**必须入库**——`.gitignore` 用 `!` 开例外，`make clean` 也**不删**它。
+用户拿到仓库即可直接拷贝运行，**无需先构建**。
+
+（`runelf.hpappdir/my_app.elf` 一直是这样做的；此前的疏忽导致
+`suika`/`cube3d` 的包缺 ELF，`make clean` 后包里是空的。）
+
 ## 整理记录
 
 - 名称依据**源码实际内容**：`primecode.c` 是编辑器、`suika_prime.c` 是水果游戏

@@ -4,9 +4,9 @@
 *.o
 *.elf
 
-# 可上传包里的产物（由 make deploy 生成；包结构本身入库）
-examples/cube3d/cube3d.hpappdir/my_app.elf
-examples/suika/suika.hpappdir/my_app.elf
+# 可上传包（.hpappdir/）是交付物，必须自包含 —— 其中的 ELF 要入库，
+# 用户直接拷贝目录即可运行，不需先构建。
+!*/*/*.hpappdir/my_app.elf
 
 # 由 tools/fontgen.py 从 font/unifont-*.hex 生成的字体源（make 会自动重建）
 examples/suika/unifont_font.c

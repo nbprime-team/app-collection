@@ -59,4 +59,3 @@ deploy: $(TARGET).elf
 
 clean:
 	rm -f $(TARGET).o prime_input.o prime_hook.o $(TARGET).elf
-	rm -f $(APPDIR)/my_app.elf

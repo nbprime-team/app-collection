@@ -71,4 +71,3 @@ deploy: suika_prime.elf
 
 clean:
 	rm -f suika_prime.o prime_input.o $(FONT_O) $(FONT_C) $(FONT_H) suika_prime.elf
-	rm -f $(APPDIR)/my_app.elf
