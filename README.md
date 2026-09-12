@@ -1,6 +1,6 @@
 # app-collection
 
-> ⚠️ **AI 生成 / 辅助创作：DeepSeek V4.1 Flash**（未人工审查）
+> ⚠️ **AI 生成 / 辅助创作：DeepSeek V4.1 Flash**（LCD 已人工审查）
 
 Prime 平台的应用与工具集合。**一个项目/应用一个目录**，编译产物不入库。
 
