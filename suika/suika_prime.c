@@ -1,0 +1,697 @@
+#include <stdint.h>
+#include "unifont_font.h"
+
+#define LCD_W 320
+#define LCD_H 240
+#define MAX_FRUITS 40
+#define GAME_TOP 40
+#define FLOOR_Y 232
+#define SPAWN_Y 44
+#define FRAME_MS 20
+#define DROP_DELAY_FRAMES 20
+
+/* Exact PureDOOM event values/layout. */
+#define EV_TICK 15u
+#define EV_KEY 0x00100010u
+#define KEY_DOWN 16u
+#define KEY_UP 0x00100000u
+#define TOUCH_BEGIN 1u
+#define TOUCH_MOVE 2u
+#define TOUCH_END 8u
+
+/* PureDOOM install_input_hack() target from the supplied puredoom.elf. */
+#define INPUT_HOOK_TARGET 0x307FBFA0u
+
+extern void *prime_sys_get_lcd(void);
+extern void prime_sys_sleep(uint32_t ms);
+extern void prime_sys_get_event(void *event);
+extern void prime_privileged_memcpy(void *dst, const void *src, uint32_t size);
+
+/* Keep at least one runtime relocation for the existing ELF loader. */
+static uint32_t *volatile relocation_anchor = (uint32_t *)&relocation_anchor;
+
+/* The firmware calls our hook with R0 = ui_event_prime_s*. */
+static volatile int g_quit;
+static volatile int g_touch_x;
+static volatile int g_touch_y;
+/* 0=none, 1=begin, 2=move, 3=end */
+static volatile int g_touch_state;
+static volatile uint32_t g_touch_serial;
+
+static uint8_t g_saved_input_code[16] __attribute__((aligned(4)));
+static uint32_t g_input_trampoline[2] __attribute__((aligned(4)));
+static volatile int g_hook_installed;
+
+struct Fruit {
+    int active;
+    int type;
+    int x_q8;
+    int y_q8;
+    int vx_q8;
+    int vy_q8;
+};
+
+static struct Fruit fruits[MAX_FRUITS];
+/* 320*240*4 = 307200 bytes; renders off-screen then blits once per frame. */
+static uint32_t framebuf[LCD_W * LCD_H] __attribute__((aligned(32)));
+static uint32_t rng_state = 0x4D455247u;
+static int score;
+static int current_type;
+static int current_x;
+static int current_down;
+static int game_over;
+static int game_over_timer;
+static int spawn_lock;
+
+static const int radius_px[9] = {8,11,14,18,22,27,32,38,44};
+static const int value_table[9] = {1,3,6,10,15,21,28,36,45};
+
+static const uint32_t fruit_color[9] = {
+    0xFFFF4F81u, 0xFFFF6B5Au, 0xFF7D45D8u,
+    0xFFFFA62Bu, 0xFFE83B30u, 0xFFFFC845u,
+    0xFF8CC63Eu, 0xFF9B5B2Cu, 0xFFFFD94Au
+};
+
+static int rd16(const uint8_t *p)
+{
+    return (int)(p[0] | ((uint16_t)p[1] << 8));
+}
+
+static uint32_t rd32(const uint8_t *p)
+{
+    return (uint32_t)p[0]
+        | ((uint32_t)p[1] << 8)
+        | ((uint32_t)p[2] << 16)
+        | ((uint32_t)p[3] << 24);
+}
+
+/*
+ * Direct reconstruction of DOOM's install_input_hack().
+ * It saves 16 bytes at 0x307fbfa0, then replaces the first 8 bytes with:
+ *
+ *   ldr pc, [pc, #-4]
+ *   .word hook_address
+ */
+static void install_input_hook(void);
+static void remove_input_hook(void);
+static void suika_event_hook(void *event);
+
+static void install_input_hook(void)
+{
+    uint32_t target = INPUT_HOOK_TARGET;
+
+    if (g_hook_installed)
+        return;
+
+    prime_privileged_memcpy(
+        g_saved_input_code,
+        (const void *)target,
+        16
+    );
+
+    g_input_trampoline[0] = 0xE51FF004u;
+    g_input_trampoline[1] = (uint32_t)(uintptr_t)&suika_event_hook;
+
+    prime_privileged_memcpy(
+        (void *)target,
+        g_input_trampoline,
+        8
+    );
+
+    g_hook_installed = 1;
+}
+
+static void remove_input_hook(void)
+{
+    uint32_t target = INPUT_HOOK_TARGET;
+
+    if (!g_hook_installed)
+        return;
+
+    prime_privileged_memcpy(
+        (void *)target,
+        g_saved_input_code,
+        16
+    );
+
+    g_hook_installed = 0;
+}
+
+/*
+ * This is intentionally close to PureDOOM's my_get_event_hook().
+ * The original hook:
+ *   1. calls sys_get_event(event)
+ *   2. checks event_type at +4
+ *   3. for event_type 15, scans up to 8 records
+ *   4. accepts records whose +4 field is zero
+ *   5. uses action +0, x +6, y +8
+ *   6. for key events (0x00100010), converts the key and enqueues it
+ *
+ * We only need the raw input, so the converted data is stored in volatile
+ * globals and consumed by the game loop.
+ */
+__attribute__((noinline, used))
+static void suika_event_hook(void *event)
+{
+    uint8_t *p = (uint8_t *)event;
+    uint32_t event_type;
+    int count;
+    int i;
+
+    if (!p)
+        return;
+
+    prime_sys_get_event(event);
+
+    event_type = rd32(p + 4);
+
+    /* Any key down/up event exits the game. */
+    if (event_type == EV_KEY) {
+        int action = rd16(p + 28);
+        if (action == (int)KEY_DOWN || action == (int)KEY_UP)
+            g_quit = 1;
+        return;
+    }
+
+    if (event_type != EV_TICK)
+        return;
+
+    count = rd16(p + 24);
+    if (count > 8)
+        count = 8;
+    if (count < 0)
+        count = 0;
+
+    for (i = 0; i < count; ++i) {
+        uint8_t *m = p + 28 + i * 12;
+        int action = rd16(m + 0);
+        int valid_field = rd16(m + 4);
+        int x = rd16(m + 6);
+        int y = rd16(m + 8);
+
+        /* Exactly the same validity test used by DOOM's hook. */
+        if (valid_field != 0)
+            continue;
+
+        if (action != (int)TOUCH_BEGIN &&
+            action != (int)TOUCH_MOVE &&
+            action != (int)TOUCH_END)
+            continue;
+
+        if (x < 0) x = 0;
+        if (x >= LCD_W) x = LCD_W - 1;
+        if (y < 0) y = 0;
+        if (y >= LCD_H) y = LCD_H - 1;
+
+        g_touch_x = x;
+        g_touch_y = y;
+        if (action == (int)TOUCH_BEGIN)
+            g_touch_state = 1;
+        else if (action == (int)TOUCH_MOVE)
+            g_touch_state = 2;
+        else
+            g_touch_state = 3;
+        ++g_touch_serial;
+    }
+}
+
+static uint32_t *lcd_framebuffer(void)
+{
+    uint32_t *lcd = (uint32_t *)prime_sys_get_lcd();
+    uint32_t *vtable;
+    if (!lcd) return (uint32_t *)0;
+    vtable = *(uint32_t **)lcd;
+    if (!vtable) return (uint32_t *)0;
+    return *(uint32_t **)((uint8_t *)vtable + 0x10);
+}
+
+static int isqrt_u32(uint32_t n)
+{
+    uint32_t bit = 1u << 30;
+    uint32_t res = 0;
+    while (bit > n) bit >>= 2;
+    while (bit) {
+        if (n >= res + bit) {
+            n -= res + bit;
+            res = (res >> 1) + bit;
+        } else {
+            res >>= 1;
+        }
+        bit >>= 2;
+    }
+    return (int)res;
+}
+
+static void clear_fb(uint32_t *fb, uint32_t color)
+{
+    int i;
+    for (i = 0; i < LCD_W * LCD_H; ++i)
+        fb[i] = color;
+}
+
+static void blit_fb(uint32_t *dst, const uint32_t *src)
+{
+    int i;
+    for (i = 0; i < LCD_W * LCD_H; ++i)
+        dst[i] = src[i];
+}
+
+static void put_pixel(uint32_t *fb, int x, int y, uint32_t color)
+{
+    if ((unsigned)x >= LCD_W || (unsigned)y >= LCD_H) return;
+    fb[y * LCD_W + x] = color;
+}
+
+static void hline(uint32_t *fb, int x0, int x1, int y, uint32_t color)
+{
+    int x;
+    if ((unsigned)y >= LCD_H) return;
+    if (x0 > x1) { int t = x0; x0 = x1; x1 = t; }
+    if (x1 < 0 || x0 >= LCD_W) return;
+    if (x0 < 0) x0 = 0;
+    if (x1 >= LCD_W) x1 = LCD_W - 1;
+    for (x = x0; x <= x1; ++x)
+        fb[y * LCD_W + x] = color;
+}
+
+static void fill_circle(uint32_t *fb, int cx, int cy, int radius, uint32_t color)
+{
+    int dy;
+    int rr = radius * radius;
+    for (dy = -radius; dy <= radius; ++dy) {
+        int rem = rr - dy * dy;
+        int dx = isqrt_u32((uint32_t)(rem > 0 ? rem : 0));
+        hline(fb, cx - dx, cx + dx, cy + dy, color);
+    }
+}
+
+static void draw_char(uint32_t *fb, int x, int y, char c, int scale, uint32_t color)
+{
+    uint8_t width;
+    const uint16_t *rows = unifont_glyph((unsigned char)c, &width);
+    int row, col, sx, sy;
+    for (row = 0; row < 16; ++row) {
+        uint16_t bits = rows[row];
+        for (col = 0; col < (int)width; ++col) {
+            if (bits & (uint16_t)(1u << (width - 1 - col))) {
+                for (sy = 0; sy < scale; ++sy)
+                    for (sx = 0; sx < scale; ++sx)
+                        put_pixel(fb,
+                                  x + col * scale + sx,
+                                  y + row * scale + sy,
+                                  color);
+            }
+        }
+    }
+}
+
+static int glyph_advance(char c, int scale, int gap)
+{
+    uint8_t width;
+    (void)unifont_glyph((unsigned char)c, &width);
+    return (int)width * scale + gap;
+}
+
+static void draw_text(uint32_t *fb, int x, int y, const char *s,
+                      int scale, int gap, uint32_t color)
+{
+    while (*s) {
+        char c = *s++;
+        draw_char(fb, x, y, c, scale, color);
+        x += glyph_advance(c, scale, gap);
+    }
+}
+
+static int text_width(const char *s, int scale, int gap)
+{
+    int width = 0;
+    while (*s) {
+        width += glyph_advance(*s++, scale, gap);
+    }
+    return width > 0 ? width - gap : 0;
+}
+
+static uint32_t random_u32(void)
+{
+    uint32_t x = rng_state;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    rng_state = x;
+    return x;
+}
+
+static int next_type(void)
+{
+    uint32_t r = random_u32() % 100u;
+    if (r < 28) return 0;
+    if (r < 50) return 1;
+    if (r < 68) return 2;
+    if (r < 82) return 3;
+    return 4;
+}
+
+static int fruit_radius(const struct Fruit *f) { return radius_px[f->type]; }
+
+static int add_fruit(int type, int x, int y, int vx, int vy)
+{
+    int i;
+    for (i = 0; i < MAX_FRUITS; ++i) {
+        if (!fruits[i].active) {
+            fruits[i].active = 1;
+            fruits[i].type = type;
+            fruits[i].x_q8 = x << 8;
+            fruits[i].y_q8 = y << 8;
+            fruits[i].vx_q8 = vx << 8;
+            fruits[i].vy_q8 = vy << 8;
+            return i;
+        }
+    }
+    return -1;
+}
+
+static void remove_fruit(int i)
+{
+    if (i >= 0 && i < MAX_FRUITS)
+        fruits[i].active = 0;
+}
+
+static void merge_pair(int a, int b)
+{
+    int type = fruits[a].type;
+    int x = (fruits[a].x_q8 + fruits[b].x_q8) >> 1;
+    int y = (fruits[a].y_q8 + fruits[b].y_q8) >> 1;
+    int vx = (fruits[a].vx_q8 + fruits[b].vx_q8) >> 1;
+    int vy = ((fruits[a].vy_q8 + fruits[b].vy_q8) >> 1) - 30;
+    int i;
+
+    remove_fruit(a);
+    remove_fruit(b);
+    score += value_table[type];
+
+    if (type >= 8) {
+        score += 100;
+        return;
+    }
+
+    for (i = 0; i < MAX_FRUITS; ++i) {
+        if (!fruits[i].active) {
+            fruits[i].active = 1;
+            fruits[i].type = type + 1;
+            fruits[i].x_q8 = x;
+            fruits[i].y_q8 = y;
+            fruits[i].vx_q8 = vx;
+            fruits[i].vy_q8 = vy;
+            return;
+        }
+    }
+}
+
+static void resolve_physics(void)
+{
+    int i, j, pass;
+    for (pass = 0; pass < 3; ++pass) {
+        int changed = 0;
+
+        for (i = 0; i < MAX_FRUITS; ++i) {
+            struct Fruit *a = &fruits[i];
+            if (!a->active) continue;
+
+            a->vy_q8 += 44;
+            if (a->vy_q8 > 1800) a->vy_q8 = 1800;
+            a->x_q8 += a->vx_q8;
+            a->y_q8 += a->vy_q8;
+
+            {
+                int r = fruit_radius(a);
+                int minx = r << 8;
+                int maxx = (LCD_W - r) << 8;
+                int floor = (FLOOR_Y - r) << 8;
+                if (a->x_q8 < minx) { a->x_q8 = minx; a->vx_q8 = -a->vx_q8 / 3; }
+                if (a->x_q8 > maxx) { a->x_q8 = maxx; a->vx_q8 = -a->vx_q8 / 3; }
+                if (a->y_q8 > floor) {
+                    a->y_q8 = floor;
+                    if (a->vy_q8 > 80) a->vy_q8 = -a->vy_q8 / 4;
+                    else a->vy_q8 = 0;
+                    a->vx_q8 = a->vx_q8 * 7 / 8;
+                }
+            }
+        }
+
+        for (i = 0; i < MAX_FRUITS; ++i) {
+            struct Fruit *a = &fruits[i];
+            if (!a->active) continue;
+            for (j = i + 1; j < MAX_FRUITS; ++j) {
+                struct Fruit *b = &fruits[j];
+                int dx, dy, dist2, min_d, dist;
+                if (!b->active) continue;
+                dx = (b->x_q8 - a->x_q8) >> 8;
+                dy = (b->y_q8 - a->y_q8) >> 8;
+                min_d = fruit_radius(a) + fruit_radius(b);
+                dist2 = dx * dx + dy * dy;
+                if (dist2 > min_d * min_d) continue;
+
+                if (a->type == b->type && a->type < 8) {
+                    merge_pair(i, j);
+                    changed = 1;
+                    continue;
+                }
+
+                dist = isqrt_u32((uint32_t)(dist2 > 0 ? dist2 : 1));
+                if (dist < 1) dist = 1;
+                {
+                    int overlap = min_d - dist;
+                    int pushx = dx * overlap / dist;
+                    int pushy = dy * overlap / dist;
+                    a->x_q8 -= pushx * 128;
+                    a->y_q8 -= pushy * 128;
+                    b->x_q8 += pushx * 128;
+                    b->y_q8 += pushy * 128;
+                    if (dy > 0) {
+                        if (b->vy_q8 > 0) b->vy_q8 /= 3;
+                        if (a->vy_q8 > 0) a->vy_q8 /= 2;
+                    }
+                    if (dx != 0) {
+                        a->vx_q8 += dx > 0 ? -12 : 12;
+                        b->vx_q8 += dx > 0 ? 12 : -12;
+                    }
+                }
+            }
+        }
+
+        if (!changed) break;
+    }
+}
+
+static void check_game_over(void)
+{
+    int i;
+    int danger = 0;
+    for (i = 0; i < MAX_FRUITS; ++i) {
+        if (!fruits[i].active) continue;
+        if ((fruits[i].y_q8 >> 8) - fruit_radius(&fruits[i]) < GAME_TOP + 3 &&
+            fruits[i].vy_q8 >= -10) {
+            danger = 1;
+            break;
+        }
+    }
+    if (danger) {
+        ++game_over_timer;
+        if (game_over_timer > 70) game_over = 1;
+    } else {
+        game_over_timer = 0;
+    }
+}
+
+static void spawn_current(void)
+{
+    current_type = next_type();
+    current_x = LCD_W / 2;
+    current_down = 1;
+}
+
+static void reset_game(void)
+{
+    int i;
+    for (i = 0; i < MAX_FRUITS; ++i)
+        fruits[i].active = 0;
+    score = 0;
+    game_over = 0;
+    game_over_timer = 0;
+    current_down = 0;
+    spawn_lock = 0;
+    rng_state ^= 0xA53C9E71u;
+    spawn_current();
+}
+
+static void drop_current(void)
+{
+    if (!current_down || spawn_lock || game_over)
+        return;
+    if (add_fruit(current_type, current_x, SPAWN_Y, 0, 0) < 0) {
+        game_over = 1;
+        return;
+    }
+    current_down = 0;
+    /* Prevent an immediate second drop from creating a new fruit at the edge. */
+    spawn_lock = DROP_DELAY_FRAMES;
+}
+
+/*
+ * Consume the most recent hook event. Events arrive asynchronously from the
+ * firmware; no SVC is called here.
+ */
+static void consume_touch(void)
+{
+    int state = g_touch_state;
+    int x = g_touch_x;
+    (void)g_touch_y;
+
+    if (!state)
+        return;
+
+    if (state == 1 || state == 2) {
+        if (!game_over) {
+            int r = radius_px[current_type];
+            if (x < r) x = r;
+            if (x > LCD_W - r) x = LCD_W - r;
+            current_x = x;
+            current_down = 1;
+        }
+    } else if (state == 3) {
+        if (!game_over)
+            drop_current();
+    }
+
+    g_touch_state = 0;
+}
+
+static void draw_hud(uint32_t *fb)
+{
+    char score_buf[12];
+    char tmp[12];
+    int n = 0;
+    int t = 0;
+    int v = score;
+    int i;
+    int sw;
+
+    if (v == 0) score_buf[n++] = '0';
+    else {
+        while (v > 0 && t < 11) {
+            tmp[t++] = (char)('0' + (v % 10));
+            v /= 10;
+        }
+        for (i = t - 1; i >= 0; --i)
+            score_buf[n++] = tmp[i];
+    }
+    score_buf[n] = 0;
+
+    draw_text(fb, 8, 11, "SCORE", 2, 1, 0xFFFFFFFFu);
+    sw = text_width(score_buf, 2, 1);
+    (void)sw;
+    draw_text(fb, 100, 11, score_buf, 2, 1, 0xFFFFD94Au);
+    draw_text(fb, 245, 11, "NEXT", 1, 1, 0xFFB8C7D9u);
+    hline(fb, 0, LCD_W - 1, GAME_TOP, 0xFF8C1D1Du);
+}
+
+static void draw_fruit(uint32_t *fb, int type, int x, int y)
+{
+    int r = radius_px[type];
+    uint32_t dark = 0xFF202020u;
+    fill_circle(fb, x, y, r + 1, dark);
+    fill_circle(fb, x, y, r, fruit_color[type]);
+    fill_circle(fb, x - r / 3, y - r / 3, r / 4 + 1, 0xFFFFFFFFu);
+}
+
+static void render(void)
+{
+    int i;
+
+    clear_fb(framebuf, 0xFF15202Bu);
+    draw_hud(framebuf);
+
+    for (i = 0; i < MAX_FRUITS; ++i) {
+        if (!fruits[i].active) continue;
+        draw_fruit(framebuf,
+                   fruits[i].type,
+                   fruits[i].x_q8 >> 8,
+                   fruits[i].y_q8 >> 8);
+    }
+
+    if (!game_over && current_down)
+        draw_fruit(framebuf, current_type, current_x, SPAWN_Y);
+
+    /* Keep the exit hint above fruit sprites so it remains readable. */
+    draw_text(framebuf, 4, 222, "ANY KEY EXIT", 1, 0, 0xFFB8C7D9u);
+
+    if (game_over) {
+        draw_text(framebuf, 78, 96, "GAME OVER", 2, 1, 0xFFFFFFFFu);
+        draw_text(framebuf, 60, 140, "TOUCH TO RESTART", 1, 0, 0xFFFFD94Au);
+    }
+}
+
+static void restart_if_touched(void)
+{
+    if (g_touch_state == 3) {
+        reset_game();
+        g_touch_state = 0;
+    }
+}
+
+/* Keep main away from address 0: the HP loader treats return 0 as failure. */
+__attribute__((section(".text.entrypad"), used, noinline))
+static void entry_pad(void)
+{
+    __asm volatile("nop\n nop\n nop\n nop");
+}
+
+__attribute__((section(".text.main"), noinline))
+int main(void *config, void *reserved)
+{
+    uint32_t *lcd_fb;
+    int frame;
+
+    (void)config;
+    (void)reserved;
+    (void)relocation_anchor;
+    entry_pad();
+
+    lcd_fb = lcd_framebuffer();
+    if (!lcd_fb)
+        return 0;
+
+    g_quit = 0;
+    g_touch_state = 0;
+    g_touch_serial = 0;
+    reset_game();
+
+    /* The input hook is the crucial DOOM-derived part. */
+    install_input_hook();
+
+    for (frame = 0; ; ++frame) {
+        if (g_quit)
+            break;
+
+        if (game_over)
+            restart_if_touched();
+        else
+            consume_touch();
+
+        if (!game_over) {
+            resolve_physics();
+            check_game_over();
+            if (spawn_lock > 0)
+                --spawn_lock;
+            if (!current_down && spawn_lock == 0)
+                spawn_current();
+        }
+
+        render();
+        blit_fb(lcd_fb, framebuf);
+        prime_sys_sleep(FRAME_MS);
+    }
+
+    remove_input_hook();
+    return 0;
+}

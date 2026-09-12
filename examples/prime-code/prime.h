@@ -8,7 +8,20 @@
 #ifndef PRIME_H
 #define PRIME_H
 
+/* size_t / NULL：跟随宿主编译器（__SIZE_TYPE__），使同一份用户代码在计算器
+ * 上的 TCC 与 PC 上的 gcc 下都得到正确的 size_t 宽度（ARM 为 32 位、PC 为 64 位）。
+ * AI 辅助修订：DeepSeek V4.1 Flash（未人工审查）—— 这是为“统一 TCC 与 PC gcc 的 API/ABI”
+ * 所做的平台适配（非修 bug）；ARM 侧 __SIZE_TYPE__ 即 unsigned int，目标文件
+ * 字节不变（已验证）。详见 ../API_ABI_CONTRACT.md。 */
+#ifndef PRIME_SIZE_T_DEFINED
+#define PRIME_SIZE_T_DEFINED
+#define SIZE_T_DEFINED
+#if defined(__SIZE_TYPE__)
+typedef __SIZE_TYPE__ size_t;
+#else
 typedef unsigned int size_t;
+#endif
+#endif
 #define NULL ((void *)0)
 
 /* console output -> PRIMELOG ring (main.py prints it).

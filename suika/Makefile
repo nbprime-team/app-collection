@@ -1,3 +1,8 @@
+# AI 生成 / 辅助创作：DeepSeek V4.1 Flash（本次修订，未人工审查）
+#
+# CC 是 make 的内置变量（默认 cc），因此 `CC ?= arm-none-eabi-gcc` 不会生效——
+# 构建会静默退回宿主 cc 并报 “unrecognized command-line option '-marm'”。
+# 这里显式赋值；仍可用 `make CC=...` 从命令行覆盖。
 CC := arm-none-eabi-gcc
 READELF ?= arm-none-eabi-readelf
 PYTHON ?= python3
@@ -9,7 +14,7 @@ FONT_C := unifont_font.c
 FONT_H := unifont_font.h
 FONT_O := unifont_font.o
 
-CFLAGS ?= -mcpu=arm926ej-s -march=armv5te -marm -mfloat-abi=soft \
+CFLAGS ?= -mcpu=arm926ej-s -march=armv5tej -marm -mfloat-abi=soft \
           -fPIC -ffreestanding -fno-strict-aliasing -fno-builtin \
           -fno-stack-protector -fno-unwind-tables -fno-asynchronous-unwind-tables \
           -O2 -Wall -Wextra

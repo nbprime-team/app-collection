@@ -1,0 +1,11 @@
+# AI 生成 / 辅助创作：DeepSeek V4.1 Flash（未人工审查）
+#
+# 构建产物（各工程可自行重建）
+*.o
+*.elf
+
+# 由 tools/fontgen.py 从 font/unifont-*.hex 生成的字体源（make 会自动重建）
+examples/prime-code/unifont_font.c
+examples/prime-code/unifont_font.h
+suika/unifont_font.c
+suika/unifont_font.h

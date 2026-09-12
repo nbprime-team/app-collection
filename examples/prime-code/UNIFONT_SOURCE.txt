@@ -1,0 +1,6 @@
+GNU Unifont 17.0.04
+Official source directory:
+https://unifoundry.com/pub/unifont/unifont-17.0.04/font-builds/
+
+The build fetches unifont-17.0.04.hex.gz and embeds printable ASCII
+U+0020..U+007E into the application ELF.
