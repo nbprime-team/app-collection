@@ -41,6 +41,11 @@
 extern void *prime_sys_get_lcd(void);
 extern void  prime_sys_sleep(uint32_t ms);
 
+/* 与 suika 一致的两项 ELF 要求（否则加载器行为异常，包括退出时重启）：
+ *   1) 至少保留一个运行时重定位；
+ *   2) main 不要落在地址 0（加载器把 return 0 当作失败）。 */
+static uint32_t *volatile relocation_anchor = (uint32_t *)&relocation_anchor;
+
 /* ---- 小端读取（事件缓冲按字节偏移访问；suika 同样如此） ---- */
 
 static uint32_t rd32(const uint8_t *p)
@@ -171,16 +176,19 @@ static void line(uint32_t *fb, int x0, int y0, int x1, int y1, uint32_t color)
 
 /* ---- 极简 8×8 字模（只含本示例用到的字符；数据为 LSB 在左） ---- */
 
-static const char glyph_chars[] = " 3ABCDEIORSTUWX";
+static const char glyph_chars[] = " 3ABCDEGIKNORSTUWXY";
 static const uint8_t glyph_bits[][8] = {
     { 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00 }, /* ' ' */
     { 0x3c,0x66,0x60,0x38,0x60,0x66,0x3c,0x00 }, /* 3 */
     { 0x3c,0x66,0x66,0x7e,0x66,0x66,0x66,0x00 }, /* A */
-    { 0x3e,0x66,0x66,0x3e,0x66,0x66,0x3e,0x00 }, /* B */
+    { 0x7c,0x66,0x66,0x7c,0x66,0x66,0x7c,0x00 }, /* B */
     { 0x3c,0x66,0x06,0x06,0x06,0x66,0x3c,0x00 }, /* C */
     { 0x3e,0x66,0x66,0x66,0x66,0x66,0x3e,0x00 }, /* D */
     { 0x7e,0x06,0x06,0x3e,0x06,0x06,0x7e,0x00 }, /* E */
+    { 0x3c,0x66,0x60,0x60,0x6e,0x66,0x3c,0x00 }, /* G */
     { 0x3c,0x18,0x18,0x18,0x18,0x18,0x3c,0x00 }, /* I */
+    { 0x66,0x66,0x6c,0x78,0x6c,0x66,0x66,0x00 }, /* K */
+    { 0x66,0x6e,0x7e,0x7e,0x76,0x66,0x66,0x00 }, /* N */
     { 0x3c,0x66,0x66,0x66,0x66,0x66,0x3c,0x00 }, /* O */
     { 0x3e,0x66,0x66,0x3e,0x66,0x66,0x66,0x00 }, /* R */
     { 0x3c,0x66,0x06,0x1c,0x60,0x66,0x3c,0x00 }, /* S */
@@ -188,6 +196,7 @@ static const uint8_t glyph_bits[][8] = {
     { 0x66,0x66,0x66,0x66,0x66,0x66,0x3c,0x00 }, /* U */
     { 0x63,0x63,0x63,0x6b,0x7f,0x77,0x63,0x00 }, /* W */
     { 0x66,0x66,0x3c,0x18,0x3c,0x66,0x66,0x00 }, /* X */
+    { 0x66,0x66,0x3c,0x18,0x18,0x18,0x18,0x00 }, /* Y */
 };
 
 static int glyph_index(char c)
@@ -252,8 +261,8 @@ static void on_event(void *event)
         if (action == (int)TOUCH_BEGIN) {
             g_last_x = x; g_last_y = y; g_dragging = 1;
         } else if (action == (int)TOUCH_MOVE && g_dragging) {
-            g_ay += (float)(x - g_last_x) * 0.010f;   /* 横向拖动 -> 绕 Y */
-            g_ax += (float)(y - g_last_y) * 0.010f;   /* 纵向拖动 -> 绕 X */
+            g_ay -= (float)(x - g_last_x) * 0.010f;   /* 横向拖动 -> 绕 Y（取负使方向与拖动一致） */
+            g_ax -= (float)(y - g_last_y) * 0.010f;   /* 纵向拖动 -> 绕 X */
             g_last_x = x; g_last_y = y;
         } else if (action == (int)TOUCH_END) {
             g_dragging = 0;
@@ -289,12 +298,22 @@ static void render(uint32_t *fb, float ax, float ay)
     text(fb, 8, LCD_H - 16, "ANY KEY EXIT", C_HUD);
 }
 
+/* 把 main 顶到非 0 地址（见上方说明） */
+__attribute__((section(".text.entrypad"), used, noinline))
+static void entry_pad(void)
+{
+    __asm volatile("nop\n nop\n nop\n nop");
+}
+
+__attribute__((section(".text.main"), noinline))
 int main(void *config, void *reserved)
 {
     uint32_t *lcd = lcd_framebuffer();
 
     (void)config;
     (void)reserved;
+    (void)relocation_anchor;
+    entry_pad();
     if (!lcd) return 0;
 
     if (!prime_hook_install(on_event)) {
