@@ -1,6 +1,7 @@
 #include <stdint.h>
 #include "prime_hook.h"        /* SDK：固件输入钩子（取事件必须用它，不能轮询） */
-#include "unifont_draw.h"      /* 共享字体资源（GNU Unifont ASCII 子集） */
+#include "unifont_draw.h"
+#include "app_common.h"      /* 共享字体资源（GNU Unifont ASCII 子集） */
 
 #define LCD_W 320
 #define LCD_H 240
@@ -11,20 +12,10 @@
 #define FRAME_MS 20
 #define DROP_DELAY_FRAMES 20
 
-/* Exact PureDOOM event values/layout. */
-#define EV_TICK 15u
-#define EV_KEY 0x00100010u
-#define KEY_DOWN 16u
-#define KEY_UP 0x00100000u
-#define TOUCH_BEGIN 1u
-#define TOUCH_MOVE 2u
-#define TOUCH_END 8u
 
 extern void *prime_sys_get_lcd(void);
 extern void prime_sys_sleep(uint32_t ms);
 
-/* Keep at least one runtime relocation for the existing ELF loader. */
-static uint32_t *volatile relocation_anchor = (uint32_t *)&relocation_anchor;
 
 /* The firmware calls our hook with R0 = ui_event_prime_s*. */
 static volatile int g_quit;
@@ -64,20 +55,6 @@ static const uint32_t fruit_color[9] = {
     0xFFFFA62Bu, 0xFFE83B30u, 0xFFFFC845u,
     0xFF8CC63Eu, 0xFF9B5B2Cu, 0xFFFFD94Au
 };
-
-static int rd16(const uint8_t *p)
-{
-    return (int)(p[0] | ((uint16_t)p[1] << 8));
-}
-
-static uint32_t rd32(const uint8_t *p)
-{
-    return (uint32_t)p[0]
-        | ((uint32_t)p[1] << 8)
-        | ((uint32_t)p[2] << 16)
-        | ((uint32_t)p[3] << 24);
-}
-
 /* 输入钩子统一走 SDK：prime_hook_install()/prime_hook_remove()（见 prime_hook.h）。
  * 机制与 PureDOOM 的 install_input_hack() 同构：trampoline 直达本回调。 */
 static void suika_event_hook(void *event);
@@ -108,20 +85,20 @@ static void suika_event_hook(void *event)
 
     prime_sys_get_event(event);
 
-    event_type = rd32(p + 4);
+    event_type = app_rd32(p + 4);
 
     /* Any key down/up event exits the game. */
-    if (event_type == EV_KEY) {
-        int action = rd16(p + 28);
-        if (action == (int)KEY_DOWN || action == (int)KEY_UP)
+    if (event_type == APP_EV_KEY) {
+        int action = app_rd16(p + 28);
+        if (action == (int)APP_KEY_DOWN || action == (int)APP_KEY_UP)
             g_quit = 1;
         return;
     }
 
-    if (event_type != EV_TICK)
+    if (event_type != APP_EV_TICK)
         return;
 
-    count = rd16(p + 24);
+    count = app_rd16(p + 24);
     if (count > 8)
         count = 8;
     if (count < 0)
@@ -129,18 +106,18 @@ static void suika_event_hook(void *event)
 
     for (i = 0; i < count; ++i) {
         uint8_t *m = p + 28 + i * 12;
-        int action = rd16(m + 0);
-        int valid_field = rd16(m + 4);
-        int x = rd16(m + 6);
-        int y = rd16(m + 8);
+        int action = app_rd16(m + 0);
+        int valid_field = app_rd16(m + 4);
+        int x = app_rd16(m + 6);
+        int y = app_rd16(m + 8);
 
         /* Exactly the same validity test used by DOOM's hook. */
         if (valid_field != 0)
             continue;
 
-        if (action != (int)TOUCH_BEGIN &&
-            action != (int)TOUCH_MOVE &&
-            action != (int)TOUCH_END)
+        if (action != (int)APP_TOUCH_BEGIN &&
+            action != (int)APP_TOUCH_MOVE &&
+            action != (int)APP_TOUCH_END)
             continue;
 
         if (x < 0) x = 0;
@@ -150,24 +127,14 @@ static void suika_event_hook(void *event)
 
         g_touch_x = x;
         g_touch_y = y;
-        if (action == (int)TOUCH_BEGIN)
+        if (action == (int)APP_TOUCH_BEGIN)
             g_touch_state = 1;
-        else if (action == (int)TOUCH_MOVE)
+        else if (action == (int)APP_TOUCH_MOVE)
             g_touch_state = 2;
         else
             g_touch_state = 3;
         ++g_touch_serial;
     }
-}
-
-static uint32_t *lcd_framebuffer(void)
-{
-    uint32_t *lcd = (uint32_t *)prime_sys_get_lcd();
-    uint32_t *vtable;
-    if (!lcd) return (uint32_t *)0;
-    vtable = *(uint32_t **)lcd;
-    if (!vtable) return (uint32_t *)0;
-    return *(uint32_t **)((uint8_t *)vtable + 0x10);
 }
 
 static int isqrt_u32(uint32_t n)
@@ -185,20 +152,6 @@ static int isqrt_u32(uint32_t n)
         bit >>= 2;
     }
     return (int)res;
-}
-
-static void clear_fb(uint32_t *fb, uint32_t color)
-{
-    int i;
-    for (i = 0; i < LCD_W * LCD_H; ++i)
-        fb[i] = color;
-}
-
-static void blit_fb(uint32_t *dst, const uint32_t *src)
-{
-    int i;
-    for (i = 0; i < LCD_W * LCD_H; ++i)
-        dst[i] = src[i];
 }
 
 static void hline(uint32_t *fb, int x0, int x1, int y, uint32_t color)
@@ -502,7 +455,7 @@ static void render(void)
 {
     int i;
 
-    clear_fb(framebuf, 0xFF15202Bu);
+    app_clear_fb(framebuf, LCD_W * LCD_H, 0xFF15202Bu);
     draw_hud(framebuf);
 
     for (i = 0; i < MAX_FRUITS; ++i) {
@@ -533,13 +486,6 @@ static void restart_if_touched(void)
     }
 }
 
-/* Keep main away from address 0: the HP loader treats return 0 as failure. */
-__attribute__((section(".text.entrypad"), used, noinline))
-static void entry_pad(void)
-{
-    __asm volatile("nop\n nop\n nop\n nop");
-}
-
 __attribute__((section(".text.main"), noinline))
 int main(void *config, void *reserved)
 {
@@ -548,10 +494,9 @@ int main(void *config, void *reserved)
 
     (void)config;
     (void)reserved;
-    (void)relocation_anchor;
-    entry_pad();
+    app_elf_requirements();
 
-    lcd_fb = lcd_framebuffer();
+    lcd_fb = app_lcd_framebuffer();
     if (!lcd_fb)
         return 0;
 
@@ -582,7 +527,7 @@ int main(void *config, void *reserved)
         }
 
         render();
-        blit_fb(lcd_fb, framebuf);
+        app_blit_fb(lcd_fb, framebuf, LCD_W * LCD_H);
         prime_sys_sleep(FRAME_MS);
     }
 

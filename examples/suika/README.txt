@@ -28,8 +28,14 @@ DOOM/puredoom.elf，因此本构建**只适用于与该 DOOM 二进制相同的�
   make clean
   make
 
-字体：GNU Unifont 17.0.04 的 ASCII 子集，来自共享资源
-`app-collection/resources/prime-unifont/`（hex 已内置；缺失时才联网获取），与 cube3d 同源。
+字体与公共件
+------------
+* 字体：GNU Unifont 17.0.04 的 ASCII 子集，来自 `app-collection/resources/prime-unifont/`
+  （hex 已内置；缺失时才联网获取）；
+* 输入钩子：`toolchain/sdk/prime_hook.c`；
+* 运行支撑（事件读取、LCD 帧缓冲、整屏拷贝、ELF 硬要求）：
+  `toolchain/examples/app-common/`。
+以上都与 cube3d 同源。
 
 产物：
   suika_prime.elf

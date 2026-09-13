@@ -37,10 +37,12 @@ make -C staging/prime-code             # -> primecode.elf (24644 B)
 ```
 
 三个 C 工程的**公共构建件来自 C 核心库** [`toolchain/sdk/`](../toolchain/sdk/)
-（`-I$(SDK)/sdk`、`-T$(SDK)/sdk/prime_dyn.ld`、`prime_input.S`），各自不再保留副本；
-字体与输入钩子都是共享件：`suika` 与 `cube3d` 都用
-[`resources/prime-unifont/`](resources/prime-unifont/)（hex 已内置，无需联网），
-输入钩子统一走 `toolchain/sdk/prime_hook.c`。产物为 ELF32/DYN/ARM（soft-float）。
+（`-I$(SDK)/sdk/include`、`-T$(SDK)/sdk/platform/prime_dyn.ld`、`prime_input.S`），各自不再保留副本；
+字体、输入钩子与公共运行支撑都是共享件：`suika` 与 `cube3d` 都用
+[`resources/prime-unifont/`](resources/prime-unifont/)（hex 已内置，无需联网）、
+[`toolchain/sdk/src/prime_hook.c`](../toolchain/sdk/src/prime_hook.c)（输入钩子）与
+[`toolchain/examples/app-common/`](../toolchain/examples/app-common/)（事件读取 / LCD / 
+整屏拷贝 / ELF 硬要求）。产物为 ELF32/DYN/ARM（soft-float）。
 
 ## 新增一个应用
 
@@ -60,11 +62,11 @@ make -C staging/prime-code             # -> primecode.elf (24644 B)
    APPDIR := $(TARGET).hpappdir        # 定义后模板才生成 deploy
    OBJS   := $(TARGET).o prime_input.o prime_hook.o
    include $(SDK)/templates/app.mk
-   # 需要字体时（与 suika/cube3d 同源）：
-   include ../../resources/prime-unifont/unifont.mk
+   include $(SDK)/examples/app-common/app_common.mk      # 公共运行支撑（必需）
+   include ../../resources/prime-unifont/unifont.mk      # 字体（需要时）
    ```
 
-   模板已提供 ARM 目标参数、`-I$(SDK)/sdk`、`-T$(SDK)/sdk/prime_dyn.ld`、
+   模板已提供 ARM 目标参数、`-I$(SDK)/sdk/include`、`-T$(SDK)/sdk/platform/prime_dyn.ld`、
    `prime_input.o` / `prime_hook.o` 规则与 `all` / `check` / `deploy` / `clean`。
    `prime_input.S` 是必需项（提供 `prime_sys_get_lcd` / `prime_sys_get_event` /
    `prime_sys_sleep` 的 SVC 包装，否则链接报 undefined reference）。
