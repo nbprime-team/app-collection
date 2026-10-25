@@ -458,6 +458,24 @@ def run_app(elf_filename, app_dir_for_c, enable_config=True, enable_logging=True
         except: # 在某些没有input的micropython环境，直接跳过
             pass
             
+        # --- 上次崩溃现场（落盘日志）--- 
+        # C 侧崩溃时不会 return，引导器读不到内存环形缓冲；因此 prime-markdown
+        # 把每条日志落盘成 crash.log（每次 open("wb+")/write/close，内容 = 最后一条
+        # 日志 = 崩前最后到达的位置）。启动前先读出来显示。
+        try:
+            with uio.FileIO("crash.log", "rb") as f:
+                prev = f.read()
+            try:
+                prev_txt = prev.decode("utf-8")
+            except Exception:
+                prev_txt = "".join(chr(x) for x in prev)
+            if prev_txt.strip():
+                print("\n=== crash.log from previous run (last line = where it died) ===")
+                print(prev_txt.rstrip())
+                print("=== end crash.log ===")
+        except Exception:
+            pass  # 没有 crash.log 属正常
+
         log_addr = dbg.call(entry_point, config_addr, 0)
         print("[+] C code returned log structure address: 0x{:08X}".format(log_addr))
 

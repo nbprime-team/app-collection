@@ -1,0 +1,20 @@
+# AI 生成 / 辅助创作：DeepSeek V4.1 Flash（未人工审查）
+#
+# app-collection/examples/paint/Makefile —— 触摸绘图板（工程示例）
+#
+#   make / make check / make deploy / make clean
+#
+# 公共规则见 toolchain/templates/app.mk；字体来自 resources/prime-unifont。
+
+SDK    ?= ../../../toolchain
+TARGET := paint
+APPDIR := $(TARGET).hpappdir
+
+OBJS   := $(TARGET).o prime_input.o prime_hook.o
+
+include $(SDK)/templates/app.mk
+include $(SDK)/examples/app-common/app_common.mk
+include ../../resources/prime-unifont/unifont.mk
+
+# 字体头由 unifont.mk 生成，先于本工程源编译
+$(TARGET).o: $(UNIFONT_H)

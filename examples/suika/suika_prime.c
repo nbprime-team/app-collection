@@ -13,10 +13,6 @@
 #define DROP_DELAY_FRAMES 20
 
 
-extern void *prime_sys_get_lcd(void);
-extern void prime_sys_sleep(uint32_t ms);
-
-
 /* The firmware calls our hook with R0 = ui_event_prime_s*. */
 static volatile int g_quit;
 static volatile int g_touch_x;
