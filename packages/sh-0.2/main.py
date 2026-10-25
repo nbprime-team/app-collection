@@ -1,0 +1,119 @@
+# AI 生成 / 辅助创作：DeepSeek V4.1 Flash（未人工审查）
+#
+# main.py —— cprobe 探针的引导：装 my_app.elf，调用 entry，打印返回值。
+# 返回值 42 表示"自己写入的 ARM 代码能被正确执行"。
+
+import ustruct as struct
+import uio
+
+BASE = 0x307FBCAC
+
+def get_addr(int_id):
+    return BASE + 0xC * (int_id - 0x10000)
+
+ADDR_MALLOC = get_addr(0x10037)
+ADDR_FREE = get_addr(0x1003A)
+
+APP_DIR = "C:\\DATA\\sh.hpappdir"
+APP_ELF = "my_app.elf"
+
+LOADER_CODE = b'\x0b\x00\x00\xea\x04\x00-\xe5\x04\xe0-\xe5o\x02\x01\xef\x04\x00-\xe5\x04\xe0-\xe5\xca\x00\x01\xef\x04\x00-\xe5\x04\xe0-\xe5\xd4\x00\x01\xef\x04\x00-\xe5\x04\xe0-\xe5\xcf\x00\x01\xefh2\x9f\xe5\xf0O-\xe9\x030\x8f\xe0\x00 \xa0\xe1\x01`\xa0\xe1\x03\x00\x93\xe8d\xd0M\xe2\x04\x00\x8d\xe5\xb8\x10\xcd\xe1\x02\x00\xa0\xe1\x04\x10\x8d\xe2\xe7\xff\xff\xeb\x00@P\xe2s\x00\x00\n\x040\xa0\xe1\x01 \xa0\xe34\x10\xa0\xe3,\x00\x8d\xe2\xe6\xff\xff\xeb\x01\x00P\xe3j\x00\x00\x1a\xbc"\xdd\xe1\x142\x9f\xe5\x03\x00R\xe1f\x00\x00\x1aH\x10\x9d\xe5\x00 \xa0\xe3\x04\x00\xa0\xe1\xdf\xff\xff\xeb\xb85\xdd\xe1\x00\x00S\xe3x\x00\x00\n\x00P\xa0\xe3\x05p\xa0\xe1\x0c\xa0\x8d\xe2\x04\x00\x00\xea\xb85\xdd\xe1\x02\x00[\xe3\x14p\x9d\x05\x05\x00S\xe1\x19\x00\x00\xda\x040\xa0\xe1\x01 \xa0\xe3 \x10\xa0\xe3\n\x00\xa0\xe1\xcb\xff\xff\xeb\x0c\xb0\x9d\xe5\x01P\x85\xe2\x01\x00[\xe3\xf1\xff\xff\x1a\x1c0\x9d\xe5\x14\x80\x9d\xe5H\x90\x9d\xe5\x00\x00S\xe3\x08\x80\x86\xe0\x85\x92\x89\xe0K\x00\x00\x1a  \x9d\xe5\x03\x00R\xe1U\x00\x00\x8a\t\x10\xa0\xe1\x00 \xa0\xe3\x04\x00\xa0\xe1\xbc\xff\xff\xeb\xb85\xdd\xe1\x05\x00S\xe1\xe5\xff\xff\xca\x04\x00\xa0\xe1\xb1\xff\xff\xeb\x00\x00W\xe3/\x00\x00\n\x070\x96\xe7\x07p\x86\xe0\x00\x00S\xe3+\x00\x00\n\x00 \xa0\xe3\x08\xc0\xa0\xe3\x02\x00\xa0\xe1\x02\xe0\xa0\xe1\x11\x00S\xe3\x04\xe0\x97\x05\x04\x00\x00\n\x12\x00S\xe3\x04\x00\x97\x05\x01\x00\x00\n\x13\x00S\xe3\x04\xc0\x97\x05\x080\xb7\xe5\x01 \x82\xe2\x00\x00S\xe3d\x00R\x13\x01\x10\xa0\x13\x00\x10\xa0\x03\xf0\xff\xff\x1a\x00\x00^\xe3\x00\x00P\x13\x15\x00\x00\n\x00\x00\\\xe3\x08\xc0\xa0\x03\x0c\x00P\xe1\x11\x00\x00:\x0c\x00@\xe0\x00\x00\\\xe1\x01\x10\x81\xe2\xfb\xff\xff\x9a\x00\x00Q\xe3\x0b\x00\x00\n\x81\x11\x86\xe0\x0e0\x86\xe0\x0e\x10\x81\xe0\x04 \xd3\xe5\x080\x83\xe2\x17\x00R\xe3\x08\x00\x13\x05\x00 \x96\x07\x02 \x86\x00\x00 \x86\x07\x01\x00S\xe1\xf6\xff\xff\x1a\x000\xa0\xe3~\xff\x17\xee\xfd\xff\xff\x1a\x9a?\x07\xee\x15?\x07\xeeD0\x9d\xe5\x03\x00\x86\xe0d\xd0\x8d\xe2\xf0\x8f\xbd\xe8\x04\x00\xa0\xe1t\xff\xff\xeb\x00\x00\xa0\xe3d\xd0\x8d\xe2\xf0\x8f\xbd\xe8\x10\x10\x9d\xe5\x00 \xa0\xe3\x04\x00\xa0\xe1s\xff\xff\xeb\x1c \x9d\xe5\x040\xa0\xe1\x0b\x10\xa0\xe1\x08\x00\xa0\xe1k\xff\xff\xeb\x1c0\x9d\xe5  \x9d\xe5\x03\x00R\xe1\xa9\xff\xff\x9a\x030\x88\xe0\x02\x80\x88\xe0\x00 \xa0\xe3\x01 \xc3\xe4\x08\x00S\xe1\xfc\xff\xff\x1a\xa2\xff\xff\xea\x04\x00\xa0\xe1[\xff\xff\xeb\xda\xff\xff\xeah\x02\x00\x00\x7fE\x00\x00r\x00b\x00\x00\x00'
+
+
+class PrimeDebug:
+    def __init__(self, filename="debug"):
+        try:
+            self.f = uio.FileIO("debug")
+        except Exception:
+            self.f = open(filename, "rb")
+
+    def close(self):
+        try:
+            self.f.close()
+        except Exception:
+            pass
+
+    def write_mem(self, addr, val):
+        self.f.write(struct.pack("<III", 1, addr, val & 0xFFFFFFFF))
+
+    def read_mem(self, addr, size):
+        self.f.write(struct.pack("<III", 0, addr, 0))
+        return self.f.read(size)
+
+    def call(self, func_addr, *args):
+        fmt = "<III" + "I" * len(args)
+        buf = bytearray(struct.calcsize(fmt))
+        struct.pack_into(fmt, buf, 0, 2, func_addr, len(args), *args)
+        self.f.write(buf)
+        return struct.unpack_from("<I", buf, 0)[0]
+
+    def write_mem_bytes(self, addr, data):
+        pad = (4 - (len(data) % 4)) % 4
+        data = bytes(data) + b"\x00" * pad
+        for i in range(0, len(data), 4):
+            self.write_mem(addr + i, struct.unpack("<I", data[i:i + 4])[0])
+
+
+def utf16(s):
+    out = bytearray()
+    for ch in s:
+        v = ord(ch)
+        out.append(v & 0xFF)
+        out.append((v >> 8) & 0xFF)
+    out.append(0)
+    out.append(0)
+    return bytes(out)
+
+
+def elf_size(name):
+    with uio.FileIO(name, "rb") as f:
+        eh = f.read(52)
+        if len(eh) < 52 or eh[0:4] != b"\x7fELF":
+            return 0
+        phoff = struct.unpack_from("<I", eh, 28)[0]
+        phentsize = struct.unpack_from("<H", eh, 42)[0]
+        phnum = struct.unpack_from("<H", eh, 44)[0]
+        f.seek(phoff)
+        need = 0
+        for _ in range(phnum):
+            ph = f.read(phentsize)
+            if len(ph) < 32 or struct.unpack_from("<I", ph, 0)[0] != 1:
+                continue
+            end = struct.unpack_from("<I", ph, 8)[0] + struct.unpack_from("<I", ph, 20)[0]
+            if end > need:
+                need = end
+    return (need + 3) & ~3
+
+
+def main():
+    dbg = PrimeDebug()
+    base = 0
+    try:
+        size = elf_size(APP_ELF)
+        if not size:
+            print("[sh] bad ELF header")
+            return
+        loader = dbg.call(ADDR_MALLOC, (len(LOADER_CODE) + 3) & ~3)
+        dbg.write_mem_bytes(loader, LOADER_CODE)
+
+        raw = dbg.call(ADDR_MALLOC, size + 16)
+        base = (raw + 7) & ~7
+        path = utf16(APP_DIR + "\\" + APP_ELF)
+        path_addr = dbg.call(ADDR_MALLOC, len(path))
+        dbg.write_mem_bytes(path_addr, path)
+        entry = dbg.call(loader, path_addr, base)
+        dbg.call(ADDR_FREE, path_addr)
+        print("[sh] base=0x%08X entry=0x%08X" % (base, entry))
+        if not entry or entry < 0x30000000:
+            print("[sh] load failed")
+            return
+
+        ret = dbg.call(entry, 0, 0)
+        print("[sh] shell returned %d" % ret)
+    finally:
+        if base:
+            dbg.call(ADDR_FREE, base)
+        dbg.close()
+
+
+main()
