@@ -38,8 +38,6 @@
 #define C_FLOOR 0xff2a3a4au
 #define C_HUD   0xffb8c7d9u
 
-extern void prime_sys_sleep(uint32_t ms);
-
 /* ---- KM3D 的软浮点三角函数（无 libm） ---- */
 
 #define PI_F      3.14159265f

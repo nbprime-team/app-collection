@@ -21,10 +21,14 @@ Prime 平台的应用与工具集合。**一个项目/应用一个目录**，编
 |---|---|---|---|
 | `examples/suika/` | Suika 水果游戏（输入钩子经 SDK 的 `prime_hook`） | `suika.hpappdir/` | 可构建 |
 | `examples/cube3d/` | 3D 线框演示（自包含；移植自 legacy 的 KM3D） | `cube3d.hpappdir/` | 可构建 |
+| `examples/keymon/` | 键盘/触摸监视器（依赖按键的实用示例；显示扫描码+键名） | `keymon.hpappdir/` | 可构建 |
+| `examples/paint/` | 触摸绘图板（触摸拖动画线 + 工具条命中检测 + 局部重绘） | `paint.hpappdir/` | 可构建 |
+| `examples/graph/` | 函数绘图器（键盘平移/缩放 + 软浮点数学 + 坐标变换） | `graph.hpappdir/` | 可构建 |
+| `staging/prime-markdown/` | Markdown 阅读器（nMarkdown 原生移植；内嵌示例文档；输入走 SDK 原生钩子） | `prime-markdown.hpappdir/` | 可构建 |
 | `staging/prime-code/` | PrimeCode 编辑器：C 实现 `primecode.c` + MicroPython 实现 | `primecode.hpappdir/` | 可构建 |
 | `staging/prime-file-manager/` | FileManager 文件管理器（MicroPython GUI） | `FileManager.hpappdir/` | 计算器应用 |
 | `tools/runelf/runelf.hpappdir/` | 通用 ELF 运行器（加载器 + 示例 `my_app.elf`） | 本身即 `.hpappdir` | 计算器工具 |
-| `resources/prime-sans/` | Prime Sans 字体（固件提取，含 CJK） | — | 资源 |
+| `resources/prime-sans/` | Prime Sans 字体（固件提取的**参考副本**；固件接口已尝试并搁置，见其 readme） | — | 资源 |
 | `resources/prime-unifont/` | GNU Unifont（ASCII 子集）与文本绘制（suika/cube3d 共用） | — | 资源 |
 
 ## 构建 / 打包
@@ -53,6 +57,7 @@ make -C staging/prime-code             # -> primecode.elf (24644 B)
    - **ELF 必须命名为 `my_app.elf`**（`APP_ELF_FILENAME` 保持默认）——加载器 Python 侧按 `filename` 打开、C 侧按 `app_dir + filename` 打开，改名会两边不一致；
    - `<name>.hpapp`、`.hpappnote`、`.hpappprgm`：应用元数据（可从 runelf 模板复制，
      **内容无关紧要**，应用名由**目录名**承载）；
+   - `icon.png`：应用图标（38×38，见下方【应用图标】）；
 4. `Makefile`：直接 include 公共片段，不必重复样板（见
    [`toolchain/templates/app.mk`](../toolchain/templates/app.mk)）：
 
@@ -71,10 +76,38 @@ make -C staging/prime-code             # -> primecode.elf (24644 B)
    `prime_input.S` 是必需项（提供 `prime_sys_get_lcd` / `prime_sys_get_event` /
    `prime_sys_sleep` 的 SVC 包装，否则链接报 undefined reference）。
 5. 在 `.gitignore` 里忽略该产物；
-6. 更新本文件的内容表。
+6. 生成图标：在 [`tools/make-icons.py`](tools/make-icons.py) 的 `APPS` 表里登记
+   该应用（路径 / 主色 / 主题图形函数），然后运行
+   `python3 tools/make-icons.py`；
+7. 更新本文件的内容表。
 
 > 参考实现：[`examples/cube3d/`](examples/cube3d/)（最小工程，字体与钩子与 suika 同源）、
 > [`examples/suika/`](examples/suika/)（含字体生成与 `deploy`）。
+
+## 应用图标
+
+各应用图标由 [`tools/make-icons.py`](tools/make-icons.py) 生成（依赖 Pillow）：
+
+**只输出纯主图** —— 38 × 38 满幅方形，**不裁圆角、不加角标**。
+圆角与角标由使用者自行处理（例如用 `icon 工具.html`：上传产出的 `icon.png`，
+设好圆角/角标后再导出）。
+
+| 项 | 值 |
+|---|---|
+| 输出 | **38 × 38** PNG（RGBA，满幅方形，四角不透明） |
+| 内容 | 各应用**功能对应的图形**（水果/立方体/键盘/画笔/曲线/代码/文档/播放），画在纯色底上 |
+| 超采样 | 4× 后缩小（边缘平滑） |
+
+```bash
+python3 tools/make-icons.py            # 重新生成全部
+python3 tools/make-icons.py --dry-run  # 只列出目标
+```
+
+改颜色或图形：编辑脚本里的 `APPS` 表（主色、`draw_*` 函数）即可。
+
+> `tools/nb-badge.svg` 是 nbprime 的 nb logo（由 `/mnt/f/Pictures/nb.svg` 复制），
+> 供**手动加角标**时使用；生成脚本本身不引用它。
+> `staging/prime-file-manager/` 用的是其**项目自带**的图标（50×50，未替换）。
 
 ## 交付物：`.hpappdir/` 必须自包含
 

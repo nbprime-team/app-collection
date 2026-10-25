@@ -1,0 +1,178 @@
+# Makefile.prime — HP Prime 交叉构建 (PrimeTeX 公式渲染库移植)
+# =========================================================
+# 产物: build/prime/primetex.elf
+#   形态与 puredoom.elf 一致 (已验证的加载路径):
+#     - EM_ARM (0x28), ET_DYN (-shared), PIC
+#     - 首 LOAD 段 vaddr 从 0 开始
+#     - .rel.dyn 全部 R_ARM_RELATIVE, 无未定义符号 (--no-undefined)
+#     - 入口符号 app_entry (由 generic_loader.py 以 R0=cfg 调用)
+# 用法:
+#   make -f Makefile.prime               # 构建 ELF
+#   make -f Makefile.prime check         # 校验 ELF 形态 (需 python3 + readelf)
+#   make -f Makefile.prime clean
+#
+# 依赖工具链: arm-none-eabi-g++ (含 libstdc++/libsupc++/libgcc 静态库)
+#   例如 apt install gcc-arm-none-eabi g++-arm-none-eabi
+
+# ---------- 工具链 ----------
+# 系统级安装: 直接 make -f Makefile.prime
+# 无 root 解包安装 (apt-get download + dpkg-deb -x, 见 README):
+#   make -f Makefile.prime TOOLCHAIN_ROOT=/path/to/armtc/root
+GCC ?= arm-none-eabi-gcc
+GXX ?= arm-none-eabi-g++
+READELF ?= arm-none-eabi-readelf
+PYTHON ?= python3
+
+# 解包工具链时的附加搜索路径 (非系统安装需要)
+ifneq ($(TOOLCHAIN_ROOT),)
+GCC_VER := $(shell $(GXX) -dumpversion)
+TC_INC_CXX := $(TOOLCHAIN_ROOT)/usr/include/newlib/c++/$(GCC_VER)
+TC_INC_VAR := $(TC_INC_CXX)/arm-none-eabi/arm/v5te/softfp
+TC_INC_GCC := $(TOOLCHAIN_ROOT)/usr/lib/gcc/arm-none-eabi/$(GCC_VER)/include
+TC_INC_SYS := $(TOOLCHAIN_ROOT)/usr/include
+TC_INC_NEWLIB := $(TOOLCHAIN_ROOT)/usr/include/newlib
+TC_BIN_GCC := $(TOOLCHAIN_ROOT)/usr/lib/gcc/arm-none-eabi/$(GCC_VER)
+TC_LIB_NEWLIB := $(TOOLCHAIN_ROOT)/usr/lib/arm-none-eabi/newlib
+TC_CPLUS_INCLUDE_PATH := $(TC_INC_VAR):$(TC_INC_CXX)/arm-none-eabi:$(TC_INC_CXX)/backward:$(TC_INC_CXX):$(TC_INC_SYS):$(TC_INC_NEWLIB):$(TC_INC_GCC)
+EXTRA_CPPFLAGS := -I"$(TC_INC_VAR)" -I"$(TC_INC_CXX)/arm-none-eabi" -I"$(TC_INC_CXX)" \
+	-I"$(TC_INC_SYS)" -I"$(TC_INC_NEWLIB)" -I"$(TC_INC_GCC)"
+EXTRA_LDFLAGS := -B"$(TC_BIN_GCC)" -L"$(TC_LIB_NEWLIB)"
+export CPLUS_INCLUDE_PATH := $(TC_CPLUS_INCLUDE_PATH)
+export C_INCLUDE_PATH := $(TC_INC_SYS):$(TC_INC_NEWLIB):$(TC_INC_GCC)
+endif
+
+# ---------- CPU 目标 ----------
+# G1 (ARM926EJ-S, ARMv5TE):  -mcpu=arm926ej-s  -marm
+# G2 (Cortex-A7, ARMv7-A):   -mcpu=cortex-a7   -marm
+ARCH ?= arm926ej-s
+ISA  ?= -marm
+
+BUILD_DIR = build/prime
+TARGET    = $(BUILD_DIR)/primetex.elf
+
+# ---------- 编译单元 ----------
+PORT_SOURCES := \
+	port/prime_log.cpp \
+	port/prime_runtime.cpp \
+	port/prime_svc.cpp \
+	port/prime_platform.cpp \
+	port/prime_render_api.cpp \
+	port/prime_demo.cpp
+
+NMD_SOURCES := \
+	src/text/font.cpp \
+	src/text/font_pack.cpp \
+	src/text/glyph_cache.cpp \
+	src/text/compositor.cpp \
+	src/text/text_renderer.cpp \
+	src/text/text_system.cpp \
+	src/text/harfbuzz_shaper.cpp \
+	src/math/math_atoms.cpp \
+	src/math/math_lexer.cpp \
+	src/math/math_layout.cpp \
+	src/math/math_macros.cpp \
+	src/math/math_parser.cpp \
+	src/math/math_system.cpp \
+	src/render/surface565.cpp \
+	src/render/primitives.cpp \
+	src/document/utf8.cpp \
+	src/document/unicode.cpp \
+	src/generated/core_font_pack.cpp \
+	src/generated/core_math_font.cpp \
+	src/generated/unicode_tables.cpp
+
+# FreeType: 与上游 ndless 构建完全一致的裁剪单元集 (nmarkdown 定制配置)
+FREETYPE_SOURCES := \
+	third_party/freetype/src/base/ftsystem.c \
+	third_party/freetype/src/base/ftdebug.c \
+	third_party/freetype/src/base/ftinit.c \
+	third_party/freetype/src/base/ftbase.c \
+	third_party/freetype/src/base/ftbitmap.c \
+	third_party/freetype/src/base/ftmm.c \
+	third_party/freetype/src/sfnt/sfnt.c \
+	third_party/freetype/src/truetype/truetype.c \
+	third_party/freetype/src/cff/cff.c \
+	third_party/freetype/src/psaux/psaux.c \
+	third_party/freetype/src/pshinter/pshinter.c \
+	third_party/freetype/src/psnames/psnames.c \
+	third_party/freetype/src/smooth/smooth.c \
+	third_party/freetype/src/autofit/autofit.c
+
+HARFBUZZ_SOURCES := third_party/harfbuzz/src/harfbuzz.cc
+
+CPP_SOURCES = $(PORT_SOURCES) $(NMD_SOURCES) $(HARFBUZZ_SOURCES)
+C_SOURCES   = $(FREETYPE_SOURCES)
+
+CPP_OBJECTS := $(addprefix $(BUILD_DIR)/, $(PORT_SOURCES:%.cpp=%.o)) \
+               $(addprefix $(BUILD_DIR)/, $(NMD_SOURCES:%.cpp=%.o)) \
+               $(addprefix $(BUILD_DIR)/, $(HARFBUZZ_SOURCES:%.cc=%.o))
+C_OBJECTS   := $(addprefix $(BUILD_DIR)/, $(C_SOURCES:%.c=%.o))
+OBJECTS     := $(CPP_OBJECTS) $(C_OBJECTS)
+
+# ---------- 编译/链接选项 ----------
+INCLUDES := -Iinclude -Iport \
+	-Ithird_party/freetype/nmarkdown -Ithird_party/freetype/include \
+	-Ithird_party/harfbuzz/src
+
+CPPFLAGS := $(INCLUDES) -DHB_TINY=1 -DNMARKDOWN_HARFBUZZ_MATH=1 \
+	-DNMARKDOWN_PRIME=1 $(EXTRA_CPPFLAGS)
+
+# 事件诊断日志 (排障): 默认开启, 输出 [ev]/[dr] 事件级 hex 日志
+#   关闭: make -f Makefile.prime PRIMETEX_DIAG=0 ...
+PRIMETEX_DIAG ?= 1
+ifeq ($(PRIMETEX_DIAG),1)
+CPPFLAGS += -DPRIMETEX_EVENT_DIAG=1
+endif
+CFLAGS   := -std=c99 -Os -Wall -Wextra -DFT2_BUILD_LIBRARY -fPIC \
+	-ffunction-sections -fdata-sections -MMD -MP $(ISA) -mcpu=$(ARCH)
+CXXFLAGS := -std=c++17 -Os -Wall -Wextra -Wpedantic -fPIC -fexceptions \
+	-fno-rtti -fno-builtin \
+	-ffunction-sections -fdata-sections -MMD -MP $(ISA) -mcpu=$(ARCH)
+
+# ET_DYN + 入口 app_entry + 无未定义符号 + gc 裁剪
+# -Bsymbolic/--exclude-libs: 静态库(non-PIC 的 libstdc++/libgcc)的符号绑定
+# 到本地, 消除 R_ARM_JUMP_SLOT/GLOB_DAT 符号重定位 —— shellcode 加载器只
+# 处理 R_ARM_RELATIVE (+base), 不能做动态符号解析。
+LDFLAGS := -shared -Wl,-e,app_entry -Wl,--no-undefined \
+	-Wl,--gc-sections -Wl,--no-dynamic-linker -Wl,--build-id=none \
+	-Wl,-Bsymbolic -Wl,--exclude-libs,ALL \
+	-Wl,-Map=$(BUILD_DIR)/primetex.map $(EXTRA_LDFLAGS)
+
+LIBS := -lstdc++ -lsupc++ -lgcc
+
+.PHONY: all check check-relocs clean FORCE
+
+all: $(TARGET)
+
+FORCE:
+
+$(BUILD_DIR)/%.o: %.cpp
+	@mkdir -p $(dir $@)
+	$(GXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/%.o: %.cc
+	@mkdir -p $(dir $@)
+	$(GXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/%.o: %.c
+	@mkdir -p $(dir $@)
+	$(GCC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
+
+$(TARGET): $(OBJECTS)
+	@mkdir -p $(dir $@)
+	$(GXX) -nostdlib $(LDFLAGS) $(OBJECTS) $(LIBS) -o $@
+
+# 形态校验: python 脚本 (无 readelf 也能跑) + readelf 摘要
+check: $(TARGET)
+	@$(PYTHON) tools/check_elf.py $(TARGET)
+	@echo "--- readelf 摘要 ---"
+	$(READELF) -h $(TARGET) | grep -E "Class|Machine|Type|Entry"
+	$(READELF) -l $(TARGET) | grep LOAD
+
+check-relocs: $(TARGET)
+	@$(PYTHON) tools/check_elf.py --relocs $(TARGET)
+
+clean:
+	rm -rf $(BUILD_DIR)
+
+-include $(OBJECTS:.o=.d)
