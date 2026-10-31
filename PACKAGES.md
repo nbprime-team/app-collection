@@ -31,13 +31,13 @@ payload_url = https://…   # 大载荷不入库时指向 release
 - `kind=pyapp`：payload 是 MicroPython 应用（`main.py`/`*.py` + 元数据），由 Python 启动器运行；包管理器只负责存放/安装。
 - `payload_url`：仓库不放的大二进制（tcc/lua）从这里取。
 
-## 生成器 `tools/pack.py`
+## 生成器（`nb-pkg` 仓库）
 
 ```bash
-python3 tools/pack.py sys    packages/hello-0.1  out/sys        # 核心区 + core.db
-python3 tools/pack.py entry  packages/hello-0.1  out/hello.hpappdir  # 薄入口
-python3 tools/pack.py bundle packages/hello-0.1  out/hello.hpappdir  # 自包含
-python3 tools/pack.py verify out/sys                            # 校验 core.db
+git clone https://github.com/nbprime-team/nb-pkg.git
+python3 -m nb_pkg install ../nb-package-index out     # sys + 全部入口
+python3 -m nb_pkg bundle  ../nb-package-index hello out/hello.hpappdir
+python3 -m nb_pkg verify  ../nb-package-index         # CI 同款校验
 ```
 
 薄入口的 `main.py` 指向 `C:\DATA\sys\bin\<name>-<ver>\<elf>`；自包含形态的

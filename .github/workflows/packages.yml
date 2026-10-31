@@ -1,0 +1,20 @@
+# AI 生成 / 辅助创作：DeepSeek V4.1 Flash（未人工审查）
+name: packages
+on:
+  push:
+    branches: [package-format, main]
+  pull_request:
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: clone nb-pkg
+        run: git clone --depth 1 https://github.com/nbprime-team/nb-pkg.git /tmp/nb-pkg
+      - name: verify packages
+        run: |
+          cd /tmp/nb-pkg
+          python -m nb_pkg verify "$GITHUB_WORKSPACE"
