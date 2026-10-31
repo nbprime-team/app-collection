@@ -32,34 +32,61 @@
 #define C_WARN 0xffffa657u
 #define C_DIM  0xff8b949e
 
-extern void prime_sys_sleep(uint32_t ms);
 
 /* hp_input.h 的键名表（现场反查用；表不全时显示 "?"） */
 struct keyname { int code; const char *name; };
 static const struct keyname g_keys[] = {
-    { HP_KEY_ESC,       "ESC" },
-    { HP_KEY_LEFT,      "LEFT" },
-    { HP_KEY_UP,        "UP" },
-    { HP_KEY_RIGHT,     "RIGHT" },
-    { HP_KEY_DOWN,      "DOWN" },
-    { HP_KEY_BACKSPACE, "BACKSPACE" },
-    { HP_KEY_ENTER,     "ENTER" },
-    { HP_KEY_SPACE,     "SPACE" },
-    { HP_KEY_ON,        "ON" },
-    { HP_KEY_SHIFT,     "SHIFT" },
-    { HP_KEY_Q,         "Q (7/Q)" },
-    { HP_KEY_F1,        "SYMB" },
-    { HP_KEY_F2,        "PLOT" },
-    { HP_KEY_F3,        "NUM" },
-    { HP_KEY_F4,        "VIEW" },
-    { HP_KEY_F5,        "CAS" },
-    { HP_KEY_F6,        "MENU" },
-    { HP_KEY_APPS,      "APPS" },
-    { HP_KEY_HELP,      "HELP" },
-    { HP_KEY_ALPHA,     "ALPHA" },
-    { HP_KEY_PLUSMINUS, "+/-" },
-    { HP_KEY_X2,        "x^2" },
+    { 0x83, "ON" },        { 0x50, "EEX" },      { 0x30, "0" },
+    { 0x54, "/" },         { 0x58, "*" },        { 0xB7, "-" },
+    { 0xB9, "+" },         { 0x20, "SPACE" },    { 0x02, "LEFT" },
+    { 0x04, "RIGHT" },     { 0x03, "UP" },       { 0x05, "DOWN" },
+    { 0x0C, "BACKSPACE" }, { 0x0D, "ENTER" },    { 0x01, "ESC" },
+    { 0xB6, "ALPHA" },     { 0x8B, "SHIFT" },    { 0x44, "xt-theta-n" },
+    { 0x43, "TEMPLATES" }, { 0x45, "ab/c" },     { 0x41, "VARS" },
+    { 0x42, "TOOLBOX" },   { 0x46, "x^y" },      { 0x47, "SIN" },
+    { 0x48, "COS" },       { 0x49, "TAN" },      { 0x4A, "LN" },
+    { 0x4B, "LOG" },       { 0x4C, "x^2" },      { 0x4D, "+/-" },
+    { 0x4E, "()" },        { 0x4F, "," },        { 0x51, "7" },
+    { 0x52, "8" },         { 0x53, "9" },        { 0x55, "4" },
+    { 0x56, "5" },         { 0x57, "6" },        { 0x59, "1" },
+    { 0x5A, "2" },         { 0x33, "3" },        { 0xB8, "." },
+    { 0x91, "SYMB" },      { 0xB2, "PLOT" },     { 0xB3, "NUM" },
+    { 0xB4, "VIEW" },      { 0xB5, "CAS" },      { 0x93, "MENU" },
+    { 0x95, "HELP" },      { 0xB1, "APPS" },
 };
+
+/* 同一张映射表（来自真机实测 keymap.md）：
+ *   正常层 / SHIFT 层 / ALPHA 层各一个字符，0 表示该层没有字符。 */
+struct kmap_entry { unsigned scan; char norm; char shf; char alp; };
+static const struct kmap_entry k_map[] = {
+    { 0x59, '1', '1', 'Y' }, { 0x5A, '2', '2', 'Z' }, { 0x33, '3', '3', '#' },
+    { 0x55, '4', '4', 'U' }, { 0x56, '5', '5', 'V' }, { 0x57, '6', '6', 'W' },
+    { 0x51, '7', '7', 'Q' }, { 0x52, '8', '8', 'R' }, { 0x53, '9', '9', 'S' },
+    { 0x30, '0', '"', '"' }, { 0xB8, '.', '=', 0 },   { 0x4F, ',', ',', 'O' },
+    { 0x54, '/', '/', 'T' }, { 0x58, '*', '*', 'X' }, { 0xB7, '-', '-', ':' },
+    { 0xB9, '+', '+', ';' }, { 0x20, ' ', '_', '_' },
+    { 0x41, 0, 0, 'A' }, { 0x42, 0, 0, 'B' }, { 0x43, 0, 0, 'C' },
+    { 0x44, 0, 0, 'D' }, { 0x45, 0, 0, 'E' }, { 0x46, 0, 0, 'F' },
+    { 0x47, 0, 0, 'G' }, { 0x48, 0, 0, 'H' }, { 0x49, 0, 0, 'I' },
+    { 0x4A, 0, 0, 'J' }, { 0x4B, 0, 0, 'K' }, { 0x4C, 0, 0, 'L' },
+    { 0x4D, 0, 0, 'M' }, { 0x4E, 0, 0, 'N' }, { 0x50, 0, 0, 'P' },
+};
+
+static const struct kmap_entry *km(unsigned scan)
+{
+    unsigned i;
+    for (i = 0; i < sizeof(k_map) / sizeof(k_map[0]); i++)
+        if (k_map[i].scan == scan)
+            return &k_map[i];
+    return 0;
+}
+
+static char *ap_char(char *p, char c)
+{
+    *p++ = c ? c : '-';
+    return p;
+}
+
 
 static const char *key_name(int code)
 {
@@ -113,6 +140,7 @@ static volatile int      g_tx, g_ty;
 static volatile unsigned g_n;
 static volatile int      g_last[8];
 static volatile int      g_quit;
+static volatile int      g_alpha, g_shift;
 
 static void on_event(void *event)
 {
@@ -137,6 +165,8 @@ static void on_event(void *event)
         g_touch = 0;
         if (w7 == 16u) {
             int i;
+            if (scan == HP_KEY_ALPHA) g_alpha = (g_alpha + 1) % 3;
+            if (scan == HP_KEY_SHIFT) g_shift = !g_shift;
             for (i = 7; i > 0; --i) g_last[i] = g_last[i - 1];
             g_last[0] = scan;
             if (scan == HP_KEY_ESC || scan == HP_KEY_ON) g_quit = 1;
@@ -198,6 +228,23 @@ int main(void *config, void *reserved)
             { char *p = ap(buf, "name = "); p = ap(p, key_name(g_key)); *p = 0; }
             unifont_draw_text(framebuf, LCD_W, LCD_H, 6, y, buf, 1, 1,
                               key_name(g_key)[0] == '?' ? C_WARN : C_ACC);
+            y += 18;
+            {
+                const struct kmap_entry *e = km((unsigned)g_key);
+                char *p = ap(buf, "n=");
+                p = ap_char(p, e ? e->norm : '-');
+                p = ap(p, " s="); p = ap_char(p, e ? e->shf : '-');
+                p = ap(p, " a="); p = ap_char(p, e ? e->alp : '-');
+                *p = 0;
+            }
+            unifont_draw_text(framebuf, LCD_W, LCD_H, 6, y, buf, 1, 1, C_FG);
+            y += 18;
+            {
+                char *p = ap(buf, "alpha="); p = ap_dec(p, g_alpha);
+                p = ap(p, " shift=");        p = ap_dec(p, g_shift);
+                *p = 0;
+            }
+            unifont_draw_text(framebuf, LCD_W, LCD_H, 6, y, buf, 1, 1, C_FG);
             y += 18;
         } else {
             unifont_draw_text(framebuf, LCD_W, LCD_H, 6, y,

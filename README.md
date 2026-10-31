@@ -1,4 +1,4 @@
-# app-collection
+# nb-package-index
 
 > ⚠️ **AI 生成 / 辅助创作：DeepSeek V4.1 Flash**（LCD 已人工审查）
 
@@ -9,13 +9,15 @@ Prime 平台的应用与工具集合。**一个项目/应用一个目录**，编
 | 类别 | 规则 | 位置 | 例子 |
 |---|---|---|---|
 | **演示应用** | 无前缀 | [`examples/`](examples/) | `examples/suika/` |
-| **单仓库候选** | 必有前缀 `prime-<name>`，先在此**暂存** | [`staging/`](staging/) | `staging/prime-code/`、`staging/prime-file-manager/` |
-| **工具** | 归入 | [`tools/`](tools/) | `tools/runelf/runelf.hpappdir/` |
+| **单仓库候选** | 必有前缀 `prime-<name>`，先在此**暂存** | [`staging/`](staging/) | **工具** | 归入 | [`tools/`](tools/) | `tools/runelf/runelf.hpappdir/` |
 | **资源** | 归入（应用运行时资源，不是构建工具） | [`resources/`](resources/) | `resources/prime-sans/` |
 
 **所有小应用**都必须是「顶层文件夹 + 其下可上传 `.hpappdir/`」；大应用的 `.hpappdir` 可选。
 
 ## 内容
+
+> 应用统一放在 [`packages/`](PACKAGES.md)；`examples/` 保留 `.hpappdir` 示例。
+
 
 | 路径 | 内容 | 可上传包 | 状态 |
 |---|---|---|---|
@@ -24,9 +26,6 @@ Prime 平台的应用与工具集合。**一个项目/应用一个目录**，编
 | `examples/keymon/` | 键盘/触摸监视器（依赖按键的实用示例；显示扫描码+键名） | `keymon.hpappdir/` | 可构建 |
 | `examples/paint/` | 触摸绘图板（触摸拖动画线 + 工具条命中检测 + 局部重绘） | `paint.hpappdir/` | 可构建 |
 | `examples/graph/` | 函数绘图器（键盘平移/缩放 + 软浮点数学 + 坐标变换） | `graph.hpappdir/` | 可构建 |
-| `staging/prime-markdown/` | Markdown 阅读器（nMarkdown 原生移植；内嵌示例文档；输入走 SDK 原生钩子） | `prime-markdown.hpappdir/` | 可构建 |
-| `staging/prime-code/` | PrimeCode 编辑器：C 实现 `primecode.c` + MicroPython 实现 | `primecode.hpappdir/` | 可构建 |
-| `staging/prime-file-manager/` | FileManager 文件管理器（MicroPython GUI） | `FileManager.hpappdir/` | 计算器应用 |
 | `tools/runelf/runelf.hpappdir/` | 通用 ELF 运行器（加载器 + 示例 `my_app.elf`） | 本身即 `.hpappdir` | 计算器工具 |
 | `resources/prime-sans/` | Prime Sans 字体（固件提取的**参考副本**；固件接口已尝试并搁置，见其 readme） | — | 资源 |
 | `resources/prime-unifont/` | GNU Unifont（ASCII 子集）与文本绘制（suika/cube3d 共用） | — | 资源 |

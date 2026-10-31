@@ -4,9 +4,14 @@
 *.o
 *.elf
 
-# 可上传包（.hpappdir/）是交付物，必须自包含 —— 其中的 ELF 要入库，
-# 用户直接拷贝目录即可运行，不需先构建。
-!*/*/*.hpappdir/my_app.elf
+# 交付物里的 ELF 要入库：
+#  - 示例的 .hpappdir/
+#  - packages/<name>/bin|lib/ 下的 payload
+!*/*/*.hpappdir/*.elf
+!packages/*/bin/*.elf
+!packages/*/lib/*.elf
+!packages/*/*.elf
+!packages/*/payload/*.elf
 
 # 由 resources/prime-unifont/fontgen.py 从 unifont-*.hex 生成的字体源（共享一份）
 resources/prime-unifont/unifont_font.c
