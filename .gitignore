@@ -10,6 +10,8 @@
 !*/*/*.hpappdir/*.elf
 !packages/*/bin/*.elf
 !packages/*/lib/*.elf
+!packages/*/*.elf
+!packages/*/payload/*.elf
 
 # 由 resources/prime-unifont/fontgen.py 从 unifont-*.hex 生成的字体源（共享一份）
 resources/prime-unifont/unifont_font.c
