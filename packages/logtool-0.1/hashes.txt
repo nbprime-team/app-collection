@@ -1,0 +1,1 @@
+5028aae83fdcf13e8cf099dacf300518166e4ba8976b35b89afa46fdffb1819c  logtool.elf
