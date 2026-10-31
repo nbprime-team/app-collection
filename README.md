@@ -28,7 +28,7 @@ Prime 平台的应用与工具集合。**一个项目/应用一个目录**，编
 | `examples/graph/` | 函数绘图器（键盘平移/缩放 + 软浮点数学 + 坐标变换） | `graph.hpappdir/` | 可构建 |
 | `tools/runelf/runelf.hpappdir/` | 通用 ELF 运行器（加载器 + 示例 `my_app.elf`） | 本身即 `.hpappdir` | 计算器工具 |
 | `resources/prime-sans/` | Prime Sans 字体（固件提取的**参考副本**；固件接口已尝试并搁置，见其 readme） | — | 资源 |
-| `resources/prime-unifont/` | GNU Unifont（ASCII 子集）与文本绘制（suika/cube3d 共用） | — | 资源 |
+| `toolchain/sdk/`（`sdk/unifont.mk`） | GNU Unifont（ASCII 子集）与文本绘制（suika/cube3d 共用） | — | 资源 |
 
 ## 构建 / 打包
 
@@ -42,7 +42,7 @@ make -C staging/prime-code             # -> primecode.elf (24644 B)
 三个 C 工程的**公共构建件来自 C 核心库** [`toolchain/sdk/`](../toolchain/sdk/)
 （`-I$(SDK)/sdk/include`、`-T$(SDK)/sdk/platform/prime_dyn.ld`、`prime_input.S`），各自不再保留副本；
 字体、输入钩子与公共运行支撑都是共享件：`suika` 与 `cube3d` 都用
-[`resources/prime-unifont/`](resources/prime-unifont/)（hex 已内置，无需联网）、
+[`toolchain/sdk/`（`sdk/unifont.mk`）](resources/prime-unifont/)（hex 已内置，无需联网）、
 [`toolchain/sdk/src/prime_hook.c`](../toolchain/sdk/src/prime_hook.c)（输入钩子）与
 [`toolchain/examples/app-common/`](../toolchain/examples/app-common/)（事件读取 / LCD / 
 整屏拷贝 / ELF 硬要求）。产物为 ELF32/DYN/ARM（soft-float）。

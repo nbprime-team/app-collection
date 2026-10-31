@@ -10,7 +10,7 @@
 #   make clean
 #
 # 公共规则见 toolchain/templates/app.mk；字体来自
-# app-collection/resources/prime-unifont（与 cube3d 同源）。
+# toolchain/sdk（sdk/unifont.mk）（与 cube3d 同源）。
 
 SDK    ?= ../../../toolchain
 TARGET := suika_prime
@@ -24,7 +24,7 @@ OBJS   := $(TARGET).o prime_input.o prime_hook.o
 
 include $(SDK)/templates/app.mk
 include $(SDK)/examples/app-common/app_common.mk
-include ../../resources/prime-unifont/unifont.mk
+include $(SDK)/sdk/unifont.mk
 
 # 字体头由 unifont.mk 生成，先于本工程源编译
 $(TARGET).o: $(UNIFONT_H)

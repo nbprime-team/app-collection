@@ -12,7 +12,7 @@ OBJS   := $(TARGET).o prime_input.o prime_hook.o
 
 include $(SDK)/templates/app.mk
 include $(SDK)/examples/app-common/app_common.mk
-include ../../resources/prime-unifont/unifont.mk
+include $(SDK)/sdk/unifont.mk
 
 # 字体头由 unifont.mk 生成，先于本工程源编译
 $(TARGET).o: $(UNIFONT_H)

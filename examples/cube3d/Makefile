@@ -9,7 +9,7 @@
 #   make clean
 #
 # 本示例**自包含**：不依赖 hp_* 运行时（其实现缺失）；文字与 suika 共用
-# app-collection/resources/prime-unifont。公共规则见 toolchain/templates/app.mk。
+# toolchain/sdk（sdk/unifont.mk）。公共规则见 toolchain/templates/app.mk。
 
 SDK    ?= ../../../toolchain
 TARGET := cube3d
@@ -21,7 +21,7 @@ OBJS   := $(TARGET).o prime_input.o prime_hook.o
 
 include $(SDK)/templates/app.mk
 include $(SDK)/examples/app-common/app_common.mk
-include ../../resources/prime-unifont/unifont.mk
+include $(SDK)/sdk/unifont.mk
 
 # 字体头由 unifont.mk 生成，先于本工程源编译
 $(TARGET).o: $(UNIFONT_H)

@@ -4,16 +4,15 @@
 #   make        -> sh.elf
 #   make install-> 拷到 ../bin/sh.elf
 #
-# 依赖：../../../../toolchain（SDK）、../../../resources/prime-unifont
+# 依赖：../../../../toolchain（SDK，含 unifont 运行库）
 
 SDK    ?= ../../../../toolchain
-UNIFONT_DIR := ../../../resources/prime-unifont
 TARGET := sh
 OBJS   := sh.o loader.o fs.o pkg.o fw_svc.o prime_input.o prime_hook.o
 
 include $(SDK)/templates/app.mk
 include $(SDK)/examples/app-common/app_common.mk
-include ../../../resources/prime-unifont/unifont.mk
+include $(SDK)/sdk/unifont.mk
 
 $(TARGET).o: $(UNIFONT_H)
 

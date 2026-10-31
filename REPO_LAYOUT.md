@@ -23,8 +23,8 @@
 
 ## 仍在迁移中
 
-1. **字体/unifont**：`resources/prime-unifont/` 的绘制代码与生成器应并入
-   `toolchain/sdk`（它是运行期 API）；Prime Sans 作为 `kind=asset` 包或归档。
+1. ~~**字体/unifont**~~：已并入 `toolchain/sdk`（`sdk/src/unifont/`、`sdk/include/unifont_draw.h`、
+   `sdk/unifont.mk`）；Prime Sans 仍待作为 `kind=asset` 包或归档。
 2. **`packages/*/src/`**：`prime-code`、`prime-markdown` 的源码应回各自仓库；
    索引只留 `pkg.cfg` + 载荷。`sh-0.2/src/` 暂时保留（体量小、无独立仓库）。
 3. **`tools/make-icons.py`**：属于打包工具，应移入 `nb-pkg`。

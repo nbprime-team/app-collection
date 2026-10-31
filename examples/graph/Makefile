@@ -4,7 +4,7 @@
 #
 #   make / make check / make deploy / make clean
 #
-# 公共规则见 toolchain/templates/app.mk；字体来自 resources/prime-unifont。
+# 公共规则见 toolchain/templates/app.mk；字体来自 SDK（$(SDK)/sdk/unifont.mk）。
 
 SDK    ?= ../../../toolchain
 TARGET := graph
@@ -14,7 +14,7 @@ OBJS   := $(TARGET).o prime_input.o prime_hook.o
 
 include $(SDK)/templates/app.mk
 include $(SDK)/examples/app-common/app_common.mk
-include ../../resources/prime-unifont/unifont.mk
+include $(SDK)/sdk/unifont.mk
 
 # 字体头由 unifont.mk 生成，先于本工程源编译
 $(TARGET).o: $(UNIFONT_H)
